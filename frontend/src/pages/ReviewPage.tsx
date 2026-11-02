@@ -1,6 +1,7 @@
 import { RenderTranscriptPanel } from '../components/RenderTranscriptPanel'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { RetakeDialog, type RetakeTarget } from '../components/RetakeDialog'
+import { ChapterPanel } from '../components/ChapterPanel'
 import { Card, Chip } from '../components/Bits'
 import { isBoolean, oneOf, usePref } from '../lib/prefs'
 import { WarningList } from '../components/WarningList'
@@ -8,7 +9,7 @@ import { WaveformRibbon } from '../components/WaveformRibbon'
 import { envelope as mockEnvelope } from '../mock/data'
 import { ACTION_LABEL, dur, isCutAction, LOUDNESS_TARGET_LABEL, loudnessSummary, tc } from '../lib/format'
 import { api, DecisionConflictError, EXPORT_BITRATES, type ExportFormat, type SessionDetail } from '../lib/api'
-import type { AudioVersion, EditDecision, LoudnessTarget, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
+import type { AudioVersion, Chapter, EditDecision, LoudnessTarget, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
 
 const FALLBACK_WAVE = mockEnvelope(190, 19)
 const PAUSE_THRESHOLD_MS = 400
@@ -17,7 +18,7 @@ const PAUSE_THRESHOLD_MS = 400
 const SENTENCE_PAUSE_MS = 600
 const LANGUAGE_LABEL: Record<string, string> = { zh: '中文', en: '英文', ja: '日文', ko: '韩文' }
 const SENTENCE_END_RE = /[。！？.!?][”’"']?\s*$/
-const TOOLS_SECTION_IDS = new Set(['review-advanced', 'review-decisions'])
+const TOOLS_SECTION_IDS = new Set(['review-advanced', 'review-decisions', 'review-chapters'])
 
 /** 转写词和"停顿间隙"共用的可选中范围——两者都只需要这三个字段。 */
 type SelectableSpan = { jobId?: string | null; startMs: number; endMs?: number | null }
@@ -55,6 +56,9 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const [pauseMessage, setPauseMessage] = useState('')
   const [exportBitrate, setExportBitrate] = usePref<number>('exportBitrate', 192, oneOf<number>(...EXPORT_BITRATES))
   const [exporting, setExporting] = useState<ExportFormat | null>(null)
+  const [chapters, setChapters] = useState<Chapter[]>([])
+  const [chapterText, setChapterText] = useState<string | null>(null)
+  const [chapterCopied, setChapterCopied] = useState(false)
   const [rendering, setRendering] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -118,12 +122,13 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
 
   const loadAll = useCallback(async () => {
     const revision = ++loadRevisionRef.current
-    const [detail, ds, ts, ws, output, versions, roles, transcriptionJob] = await Promise.all([
+    const [detail, ds, ts, ws, output, versions, roles, transcriptionJob, chapterList] = await Promise.all([
       api.getSession(sessionId), api.getDecisions(sessionId), api.getTranscript(sessionId),
       api.getWarnings(sessionId), api.getRender(sessionId), api.getVersions(sessionId), api.getRoles(sessionId), api.getLatestTranscription(sessionId),
+      api.listChapters(sessionId),
     ])
     if (revision !== loadRevisionRef.current) return detail
-    setSession(detail); setDecisions(ds); setTranscript(ts); setWarnings(ws); setRendered(output); setAsrJob(transcriptionJob)
+    setSession(detail); setDecisions(ds); setTranscript(ts); setWarnings(ws); setRendered(output); setAsrJob(transcriptionJob); setChapters(chapterList)
     const sourceId = roles.find((role) => role.role === 'RENDER_SOURCE')?.audioVersionId
     setSource(versions.find((version) => version.id === sourceId) ?? null)
     setLoaded(true)
@@ -325,6 +330,29 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     } finally { setExporting(null) }
   })
 
+  const handleChapterFromSelection = () => perform(async () => {
+    if (!wordSelection) return
+    const title = wordSelectionText.replace(/[，。！？、,.!?\s]+$/, '').slice(0, 30) || `第 ${chapters.length + 1} 章`
+    const created = await api.createChapter(sessionId, wordSelection.startMs, title)
+    setChapters((list) => [...list, created].sort((a, b) => a.startMs - b.startMs))
+    clearWordSelection()
+  })
+
+  const handleCopyChapters = () => perform(async () => {
+    if (!rendered) return
+    const text = await api.versionChaptersText(sessionId, rendered.version.id)
+    if (!text.trim()) throw new Error('这个成片里没有章节。先在“章节”中添加，再重新生成或直接复制。')
+    try {
+      await navigator.clipboard.writeText(text)
+      setChapterText(null)
+      setError(null)
+      setChapterCopied(true)
+      window.setTimeout(() => setChapterCopied(false), 2000)
+    } catch {
+      setChapterText(text) // 剪贴板不可用时直接展示，方便手动复制
+    }
+  })
+
   const handleExportTranscript = (format: 'txt' | 'srt') => perform(async () => {
     const jobId = transcript[0]?.jobId
     if (!jobId) return
@@ -501,20 +529,30 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     return { words, pauses }
   }, [transcript, decisions])
 
+  // 章节标签挂在章节起点之后的第一个词前面（起点落在停顿里时也能找到下一个词）。
+  const chapterMarkers = useMemo(() => {
+    const markers = new Map<string, Chapter[]>()
+    for (const chapter of chapters) {
+      const token = transcript.find((t) => t.jobId && t.endMs != null && t.endMs > chapter.startMs)
+      if (token) markers.set(token.id, [...(markers.get(token.id) ?? []), chapter])
+    }
+    return markers
+  }, [chapters, transcript])
+
   const transcriptParagraphs = useMemo(() => {
     const paragraphs: { token: TranscriptToken; index: number }[][] = []
     let length = 0
     transcript.forEach((token, index) => {
       const previous = transcript[index - 1]
       const gap = previous?.endMs != null ? token.startMs - previous.endMs : 0
-      if (!paragraphs.length || gap >= 1500 || (length >= 120 && SENTENCE_END_RE.test(previous?.text ?? '')) || length >= 360) {
+      if (!paragraphs.length || gap >= 1500 || chapterMarkers.has(token.id) || (length >= 120 && SENTENCE_END_RE.test(previous?.text ?? '')) || length >= 360) {
         paragraphs.push([]); length = 0
       }
       paragraphs[paragraphs.length - 1].push({ token, index })
       length += token.text.length
     })
     return paragraphs
-  }, [transcript])
+  }, [transcript, chapterMarkers])
 
   // 切出"句子"用来给播放高亮和"试听上下文"定边界。优先认识别带回来的标点（。！？等）——
   // 没有标点的旧转写，才退回用比词间停顿更长的停顿去近似句读。
@@ -742,6 +780,10 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                         ‧‧‧{(gapMs / 1000).toFixed(1)}s
                       </button>
                     )}
+                    {chapterMarkers.get(token.id)?.map((chapter) => (
+                      <button key={chapter.id} type="button" className="chapter-marker" title={`章节 · ${tc(chapter.startMs)} · 点击在“章节”中查看`}
+                        onClick={() => goToSection('review-chapters')}>§ {chapter.title}</button>
+                    ))}
                     {token.jobId && token.endMs != null ? (
                       <button id={`tok-${token.id}`} className={`transcript-word${replaced ? ' tok--replaced' : ''}${cut ? ' tok--cut' : ''}${pendingCut ? ' tok--pending-cut' : ''}${pendingRepeat ? ' tok--pending-repeat' : ''}${tokenSelected ? ' tok--selected' : ''}${tokenLinked ? ' tok--linked' : ''}${tokenSentencePlaying ? ' tok--sentence-playing' : ''}${tokenPlaying ? ' tok--playing' : ''}`} disabled={busy}
                         title={`${tc(token.startMs)} – ${tc(token.endMs)}${pendingCut ? ' · 有待确认的删除建议' : ''}${replaced ? ' · 此处已应用重录，文字仍为原录音' : ''} · 点击起点和终点，或拖动跨词选择`}
@@ -762,6 +804,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                 </span>
                 <button className="btn btn--primary" disabled={busy} onClick={handleDeleteSelectedText}>删除选中文字</button>
                 <button className="btn" disabled={busy || !ready || asrRunning} onClick={() => openRetake(wordSelection.startMs, wordSelection.endMs, wordSelectionText)}>重录选中片段</button>
+                <button className="btn" disabled={busy || !ready} onClick={handleChapterFromSelection} title="以选中内容的开头作为新章节起点">设为章节</button>
                 <button className="btn btn--link" disabled={busy} onClick={clearWordSelection}>取消选择</button>
               </div>
             )}
@@ -922,6 +965,10 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
         </details>
           </Card>
 
+        <ChapterPanel sessionId={sessionId} chapters={chapters} onChange={setChapters} totalMs={totalMs} disabled={busy || !ready}
+          currentMs={() => (audioRef.current?.currentTime ?? 0) * 1000}
+          onSeek={(ms) => { const audio = audioRef.current; if (!audio) return; previewEndRef.current = null; audio.currentTime = ms / 1000; void audio.play().catch(() => undefined) }} />
+
         <Card title="本次处理的提醒">
           <WarningList warnings={warnings} />
         </Card>
@@ -980,11 +1027,13 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                 <h3>字幕与文本</h3>
                 <div className="export-group__row">
                   {!rendered.hasReplacements && <button className="btn" disabled={busy} onClick={handleExportMaster}>成片 SRT</button>}
+                  {chapters.length > 0 && <button className="btn" disabled={busy} onClick={handleCopyChapters}>{chapterCopied ? '已复制章节列表' : '复制章节列表'}</button>}
                   {transcriptExportable && (['txt', 'srt'] as const).map((format) => (
                     <button key={format} className="btn" disabled={busy || asrRunning} onClick={() => handleExportTranscript(format)}>原始转写 {format.toUpperCase()}</button>
                   ))}
                 </div>
-                <p className="card__hint">成片 SRT 对应剪辑后的时间；原始转写对应剪辑前录音。</p>
+                <p className="card__hint">成片 SRT 与章节列表对应剪辑后的时间；原始转写对应剪辑前录音。{chapters.length > 0 && ' 章节已写入 MP3 / M4A。'}</p>
+                {chapterText && <textarea className="chapter-copy" aria-label="章节列表" readOnly rows={Math.min(8, chapterText.split('\n').length)} value={chapterText} onFocus={(event) => event.currentTarget.select()} />}
               </div>
             </div>
             {rendered.hasReplacements && <RenderTranscriptPanel key={rendered.version.id} sessionId={sessionId} versionId={rendered.version.id} audioRef={masterAudioRef} stale={rendered.stale} />}

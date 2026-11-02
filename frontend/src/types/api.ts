@@ -241,6 +241,20 @@ export interface RenderOutput {
   loudness?: LoudnessResult | null
 }
 
+/** 章节：startMs 在原始（剪辑前）时间轴上。 */
+export interface Chapter {
+  id: string
+  startMs: number
+  title: string
+}
+
+/** 换算到某个音频版本时间轴后的章节。moved 表示原起点落在被剪掉/重录的区间里，已挪到该处。 */
+export interface MappedChapter extends Chapter {
+  endMs: number
+  originalStartMs: number
+  moved: boolean
+}
+
 export type LoudnessTarget = 'podcast' | 'broadcast'
 
 /** 成片响度标准化结果；inputLufs 为 null 表示近乎静音，未做调整。 */

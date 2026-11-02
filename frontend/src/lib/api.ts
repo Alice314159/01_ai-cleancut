@@ -5,7 +5,9 @@ import type {
   DenoiseMode,
   EditDecision,
   EnhancementJob,
+  Chapter,
   LoudnessTarget,
+  MappedChapter,
   RoleAssignment,
   RenderOutput,
   TranscriptToken,
@@ -267,6 +269,26 @@ export const api = {
       throw new Error(error?.detail ?? '成片字幕导出失败')
     }
     return response.blob()
+  },
+  listChapters(id: string) {
+    return request<Chapter[]>(`/api/sessions/${id}/chapters`)
+  },
+  createChapter(id: string, startMs: number, title: string) {
+    return request<Chapter>(`/api/sessions/${id}/chapters`, { method: 'POST', body: JSON.stringify({ startMs, title }) })
+  },
+  updateChapter(id: string, chapterId: string, body: { startMs?: number; title?: string }) {
+    return request<Chapter>(`/api/sessions/${id}/chapters/${chapterId}`, { method: 'PATCH', body: JSON.stringify(body) })
+  },
+  deleteChapter(id: string, chapterId: string) {
+    return request<void>(`/api/sessions/${id}/chapters/${chapterId}`, { method: 'DELETE' })
+  },
+  versionChapters(id: string, versionId: string) {
+    return request<MappedChapter[]>(`/api/sessions/${id}/versions/${versionId}/chapters`)
+  },
+  async versionChaptersText(id: string, versionId: string) {
+    const response = await fetch(`${API_BASE}/api/sessions/${id}/versions/${versionId}/chapters?format=txt`)
+    if (!response.ok) throw new Error('章节列表读取失败')
+    return response.text()
   },
   /** 转码为 MP3 / M4A 下载；返回文件内容和服务端建议的文件名。 */
   async exportAudio(id: string, versionId: string, format: ExportFormat, bitrateKbps: number) {

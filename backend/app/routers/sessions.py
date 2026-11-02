@@ -13,6 +13,7 @@ from app.db import get_db
 from app.models import (
     AudioQualityReport,
     AudioVersion,
+    Chapter,
     EditDecision,
     EnhancementJob,
     LiveSignal,
@@ -140,6 +141,7 @@ def delete_session(session_id: str, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=409, detail="成片正在转写，请等待完成再删除")
     db.query(RenderTranscriptionJob).filter_by(session_id=session_id).delete(synchronize_session=False)
+    db.query(Chapter).filter_by(session_id=session_id).delete(synchronize_session=False)
     job_ids = [row[0] for row in db.query(EnhancementJob.id).filter_by(session_id=session_id).all()]
     if job_ids:
         db.query(VoiceProtectionMetric).filter(VoiceProtectionMetric.job_id.in_(job_ids)).delete(synchronize_session=False)
@@ -298,9 +300,11 @@ def export_version_audio(
     if not source.exists():
         raise HTTPException(status_code=404, detail="audio file missing on disk")
     title, version_type = session.title, version.version_type
+    from app.routers.chapters import chapters_for_version
+    mapped = chapters_for_version(db, session_id, version)
     db.close()  # 转码可能耗时较长，不占用数据库连接
     try:
-        path = audio_export.ensure_export(session_id, version_id, source, format, bitrate, title=title)
+        path = audio_export.ensure_export(session_id, version_id, source, format, bitrate, title=title, chapters=mapped)
     except audio_export.EncoderUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except audio_export.ExportError as exc:

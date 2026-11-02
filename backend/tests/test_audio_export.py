@@ -9,6 +9,11 @@ from app.services import audio_export
 from tests.test_rendering import client, recording  # noqa: F401  复用 fixture
 
 
+def cached_exports(session_id, version_id, fmt):
+    folder = audio_export.export_path(session_id, version_id, fmt, 192).parent
+    return sorted(folder.glob(f"{version_id}_*.{fmt}"))
+
+
 def probe(path):
     result = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)],
                             capture_output=True, check=True)
@@ -37,7 +42,7 @@ def test_export_master_transcodes_with_metadata(client, recording, isolated_back
     assert info["format"]["tags"].get("title") == "第一期/访谈"
 
     # 第二次请求直接返回缓存，不重新编码
-    cached = audio_export.export_path(session_id, master["id"], fmt, 128)
+    [cached] = cached_exports(session_id, master["id"], fmt)
     mtime = cached.stat().st_mtime_ns
     assert client.get(f"/api/sessions/{session_id}/versions/{master['id']}/export?format={fmt}&bitrate=128").content == response.content
     assert cached.stat().st_mtime_ns == mtime
@@ -68,8 +73,7 @@ def test_missing_encoder_reports_503(client, recording, monkeypatch):
 def test_export_files_removed_with_session(client, recording):
     session_id, source_id = recording[0], recording[1]
     assert client.get(f"/api/sessions/{session_id}/versions/{source_id}/export").status_code == 200
-    path = audio_export.export_path(session_id, source_id, "mp3", 192)
-    assert path.is_file()
+    [path] = cached_exports(session_id, source_id, "mp3")
     assert client.delete(f"/api/sessions/{session_id}").status_code == 204
     assert not path.exists()
 

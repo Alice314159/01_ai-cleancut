@@ -7,13 +7,15 @@
 """
 from dataclasses import dataclass
 from functools import lru_cache
+import hashlib
+import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import uuid
 
-from app.services import storage
+from app.services import chapters as chapter_service, storage
 
 
 @dataclass(frozen=True)
@@ -52,19 +54,27 @@ def encoder_available(encoder: str) -> bool:
     return re.search(rf"^\s*A\S*\s+{re.escape(encoder)}\s", result.stdout.decode(errors="ignore"), re.M) is not None
 
 
-def export_path(session_id: str, version_id: str, fmt: str, bitrate_kbps: int) -> Path:
-    return Path(storage.session_dir(session_id)) / EXPORT_DIR / f"{version_id}_{bitrate_kbps}k.{FORMATS[fmt].extension}"
+def metadata_signature(title: str = "", chapters=()) -> str:
+    """标题与章节决定文件内容，必须进缓存键：改名或改章节后不能再拿到旧文件。"""
+    payload = json.dumps([title, [(c.start_ms, c.end_ms, c.title) for c in chapters]], ensure_ascii=False)
+    return hashlib.sha256(payload.encode()).hexdigest()[:10]
+
+
+def export_path(session_id: str, version_id: str, fmt: str, bitrate_kbps: int, signature: str = "") -> Path:
+    suffix = f"_{signature}" if signature else ""
+    return Path(storage.session_dir(session_id)) / EXPORT_DIR / f"{version_id}_{bitrate_kbps}k{suffix}.{FORMATS[fmt].extension}"
 
 
 def ensure_export(session_id: str, version_id: str, source: Path, fmt: str, bitrate_kbps: int,
-                  title: str = "") -> Path:
-    """返回已编码好的文件路径；不存在时现场转码。"""
+                  title: str = "", chapters=()) -> Path:
+    """返回已编码好的文件路径；不存在时现场转码。chapters 为该版本时间轴上的章节（含 end_ms）。"""
     if fmt not in FORMATS:
         raise ExportError(f"不支持的导出格式：{fmt}")
     if bitrate_kbps not in BITRATES_KBPS:
         raise ExportError(f"不支持的码率：{bitrate_kbps} kbps")
     spec = FORMATS[fmt]
-    destination = export_path(session_id, version_id, fmt, bitrate_kbps)
+    title = (title or "")[:200]
+    destination = export_path(session_id, version_id, fmt, bitrate_kbps, metadata_signature(title, chapters))
     if destination.is_file() and destination.stat().st_size > 0:
         return destination
     if not encoder_available(spec.encoder):
@@ -73,11 +83,12 @@ def ensure_export(session_id: str, version_id: str, source: Path, fmt: str, bitr
         raise ExportError("音频文件缺失")
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp = destination.with_name(f".{uuid.uuid4().hex}.{spec.extension}")
-    command = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(source), "-vn", "-map_metadata", "-1",
-               "-c:a", spec.encoder, "-b:a", f"{bitrate_kbps}k", *spec.extra_args]
-    if title:
-        command += ["-metadata", f"title={title[:200]}"]
-    command.append(str(temp))
+    # 标题和章节写进 FFmpeg 元数据文件，再整体映射；源文件自带的元数据一律不带出。
+    meta = destination.with_name(f".{uuid.uuid4().hex}.ffmeta")
+    meta.write_text(chapter_service.ffmetadata(list(chapters), title), encoding="utf-8")
+    command = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(source), "-f", "ffmetadata", "-i", str(meta),
+               "-map", "0:a", "-map_metadata", "1", "-map_chapters", "1" if chapters else "-1",
+               "-c:a", spec.encoder, "-b:a", f"{bitrate_kbps}k", *spec.extra_args, str(temp)]
     try:
         result = subprocess.run(command, capture_output=True, timeout=TIMEOUT_SECONDS)
         if result.returncode or not temp.is_file() or temp.stat().st_size == 0:
@@ -87,6 +98,11 @@ def ensure_export(session_id: str, version_id: str, source: Path, fmt: str, bitr
         raise ExportError("转码失败或超时") from exc
     finally:
         temp.unlink(missing_ok=True)
+        meta.unlink(missing_ok=True)
+    # 同一版本、格式、码率的旧导出（标题或章节已变）不再需要。
+    for stale in destination.parent.glob(f"{version_id}_{bitrate_kbps}k*.{spec.extension}"):
+        if stale != destination:
+            stale.unlink(missing_ok=True)
     return destination
 
 

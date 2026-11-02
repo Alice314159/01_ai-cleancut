@@ -6,7 +6,7 @@
  * 录音、重录需要真实后端，演示中会给出提示。
  */
 import { API_BASE } from '../lib/api'
-import type { EditDecision, TranscriptToken } from '../types/api'
+import type { Chapter, EditDecision, TranscriptToken } from '../types/api'
 import { applyCuts, DEMO_RATE, envelope, scale, synthesize, toWav, type Word } from './audio'
 
 type Json = Record<string, unknown>
@@ -51,6 +51,7 @@ type DemoSession = {
   decisions: EditDecision[]
   render: Json | null
   enhancement: Json | null
+  chapters: Chapter[]
 }
 
 const sessions = new Map<string, DemoSession>()
@@ -71,7 +72,7 @@ function createSession(title: string, projectId: string, script: Item[], created
       captureProcessing: { applied: false, unknown: true, echoCancellationRequested: false, echoCancellationActual: 'unknown',
         noiseSuppressionRequested: false, noiseSuppressionActual: 'unknown', autoGainControlRequested: false, autoGainControlActual: 'unknown' },
     },
-    words, pcm, versions: [], roles: [], audio: new Map(), pcmByVersion: new Map(), tokens: [], job: null, decisions: [], render: null, enhancement: null,
+    words, pcm, versions: [], roles: [], audio: new Map(), pcmByVersion: new Map(), tokens: [], job: null, decisions: [], render: null, enhancement: null, chapters: [],
   }
   addVersion(session, original, 'original', '原始录音', pcm)
   session.roles = ['TIMEBASE', 'ASR_SOURCE', 'REVIEW_SOURCE', 'RENDER_SOURCE', 'EXPORT_SOURCE'].map((role) => ({ role, audioVersionId: original }))
@@ -311,6 +312,43 @@ async function handle(method: string, path: string, query: URLSearchParams, body
     if (!kept.length) return json(409, { detail: '此成片没有转写快照，请完成转写后重新生成成片' })
     return new Response(srt(sentenceCues(kept)), { headers: { 'Content-Type': 'text/plain; charset=utf-8' } })
   }
+  if (rest === 'chapters' && method === 'GET') return json(200, session.chapters)
+  if (rest === 'chapters' && method === 'POST') {
+    const startMs = Number(body.startMs), title = String(body.title ?? '').trim()
+    if (!title) return json(422, { detail: '章节标题不能为空' })
+    if (session.chapters.some((c) => c.startMs === startMs)) return json(409, { detail: '该时间点已有章节' })
+    const chapter = { id: uid('ch'), startMs, title }
+    session.chapters = [...session.chapters, chapter].sort((a, b) => a.startMs - b.startMs)
+    return json(201, chapter)
+  }
+  const chapterMatch = /^chapters\/([^/]+)$/.exec(rest)
+  if (chapterMatch) {
+    const chapter = session.chapters.find((c) => c.id === chapterMatch[1])
+    if (!chapter) return notFound('chapter not found')
+    if (method === 'DELETE') { session.chapters = session.chapters.filter((c) => c !== chapter); return json(204, null) }
+    if (typeof body.title === 'string' && body.title.trim()) chapter.title = body.title.trim()
+    return json(200, chapter)
+  }
+  const versionChapters = /^versions\/([^/]+)\/chapters$/.exec(rest)
+  if (versionChapters) {
+    const version = session.versions.find((v) => v.id === versionChapters[1])
+    if (!version) return notFound('version not found')
+    const cuts = version.versionType === 'master' && session.render ? session.render.cutsSnapshot as { startMs: number; endMs: number }[] : []
+    const map = (t: number) => {
+      let shift = 0
+      for (const c of cuts) { if (t < c.startMs) break; if (t < c.endMs) return { at: c.startMs - shift, moved: true }; shift += c.endMs - c.startMs }
+      return { at: t - shift, moved: false }
+    }
+    const duration = Number(version.durationMs)
+    const byStart = new Map<number, Json>()
+    for (const c of session.chapters) { const m = map(c.startMs); if (m.at < duration) byStart.set(m.at, { ...c, startMs: m.at, originalStartMs: c.startMs, moved: m.moved }) }
+    const list: Json[] = [...byStart.values()].sort((a, b) => Number(a.startMs) - Number(b.startMs)).map((c, i, all): Json => ({ ...c, endMs: i + 1 < all.length ? all[i + 1].startMs : duration }))
+    if (query.get('format') === 'txt') {
+      const ts = (ms: number) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`
+      return new Response(list.map((c) => `${ts(Number(c.startMs))} ${c.title}\n`).join(''), { headers: { 'Content-Type': 'text/plain; charset=utf-8' } })
+    }
+    return json(200, list)
+  }
   if (rest === 'retakes') return json(409, { detail: '演示模式不支持重录（需要麦克风和真实后端）' })
   return json(404, { detail: '演示模式未模拟该操作' })
 }
@@ -321,7 +359,13 @@ export function installDemo() {
   addDecision(lesson, lesson.words[pause].endMs + 250, lesson.words[pause + 1].startMs - 250, 'COMPRESS_SILENCE', '', 'silence_rule', '停顿 1.5 秒，建议缩短为约 0.5 秒。', true)
   void handle('POST', `/api/sessions/${lesson.detail.id}/render`, new URLSearchParams(), { loudnessTarget: 'podcast' })
   createSession('播客试录 · 开场白', 'proj_podcast', SCRIPTS.intro, 45, false)
-  createSession('第 12 期 · 本地优先的音频工作流', 'proj_podcast', SCRIPTS.episode, 5, true)
+  const episode = createSession('第 12 期 · 本地优先的音频工作流', 'proj_podcast', SCRIPTS.episode, 5, true)
+  const at = (text: string) => episode.words.find((w) => w.text === text)!.startMs
+  episode.chapters = [
+    { id: uid('ch'), startMs: 0, title: '开场' },
+    { id: uid('ch'), startMs: at('为什么'), title: '为什么要本地优先' },
+    { id: uid('ch'), startMs: at('下面'), title: '动手流程' },
+  ]
 
   ;(globalThis as Record<string, unknown>).__CLEANCUT_DEMO_AUDIO__ = (sessionId: string, versionId: string) => {
     const key = `${sessionId}/${versionId}`

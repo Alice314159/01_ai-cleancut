@@ -1694,3 +1694,18 @@ select:disabled { opacity: .55; cursor: not-allowed; }
 }
 .demo-badge { align-self: center; flex-shrink: 0; margin-right: 4px; padding: 2px 10px; border-radius: 999px; font-size: var(--step--1);
   color: var(--sig-provisional); background: var(--surface); border: 1px solid var(--sig-provisional); cursor: help; position: relative; z-index: 1; }
+
+/* 章节 */
+.chapter-list { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
+.chapter-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.chapter-row__time { color: var(--accent); font-size: var(--step--1); padding: 4px 6px; border-radius: 6px; font-variant-numeric: tabular-nums; }
+.chapter-row__time:hover { background: var(--surface-2); }
+.chapter-row input, .chapter-add input, .chapter-copy {
+  font: inherit; font-size: var(--step--1); color: var(--text); background: var(--ink); border: 1px solid var(--hairline);
+  border-radius: var(--radius); padding: 7px 10px; min-width: 0; width: 100%; color-scheme: dark; }
+.chapter-row input:focus-visible, .chapter-add input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.chapter-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.chapter-copy { margin-top: 10px; font-family: var(--font-data); resize: vertical; }
+.chapter-marker { display: inline-flex; align-items: center; margin: 0 6px 0 2px; padding: 1px 8px; border-radius: 999px; font-size: var(--step--1);
+  color: var(--accent); background: var(--surface-2); border: 1px solid var(--hairline); vertical-align: middle; }
+.chapter-marker:hover { border-color: var(--accent); }
