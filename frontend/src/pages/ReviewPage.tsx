@@ -918,15 +918,23 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
               })}</p>)}
             </div>}
             {wordSelection && (
-              <div className="word-selection-bar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8, padding: 8, background: 'var(--surface-2)', borderRadius: 'var(--radius)' }}>
-                <span className="card__hint" style={{ margin: 0 }}>
-                  已选中「{wordSelectionText}」· {tc(wordSelection.startMs)} – {tc(wordSelection.endMs)}
-                </span>
-                <button className="btn btn--primary" disabled={busy} onClick={handleDeleteSelectedText}>删除选中文字</button>
-                <button className="btn" disabled={busy || !ready || asrRunning} onClick={() => openRetake(wordSelection.startMs, wordSelection.endMs, wordSelectionText)}>重录选中片段</button>
-                <button className="btn" disabled={busy || !ready} onClick={handleChapterFromSelection} title="以选中内容的开头作为新章节起点">设为章节</button>
-                <button className="btn btn--link" disabled={busy} onClick={clearWordSelection}>取消选择</button>
+              <>
+              {/* 手机上是贴在底部导航上方的固定操作栏，不再盖住正在选择的文字；电脑上跟在转写下方。 */}
+              <div className="word-selection-bar" role="toolbar" aria-label="选中内容操作">
+                <div className="word-selection-bar__summary">
+                  <span className="word-selection-bar__text">「{wordSelectionText || '停顿'}」</span>
+                  <span className="word-selection-bar__time mono">{tc(wordSelection.startMs)} – {tc(wordSelection.endMs)} · {((wordSelection.endMs - wordSelection.startMs) / 1000).toFixed(1)} 秒</span>
+                </div>
+                <div className="word-selection-bar__actions">
+                  <button className="btn btn--primary" disabled={busy} onClick={handleDeleteSelectedText}>删除<span className="wide-only">选中文字</span></button>
+                  <button className="btn" disabled={busy || !source} onClick={() => previewRange(wordSelection.startMs, wordSelection.endMs)}>▶ 试听</button>
+                  <button className="btn" disabled={busy || !ready || asrRunning} onClick={() => openRetake(wordSelection.startMs, wordSelection.endMs, wordSelectionText)}>重录<span className="wide-only">选中片段</span></button>
+                  <button className="btn" disabled={busy || !ready} onClick={handleChapterFromSelection} title="以选中内容的开头作为新章节起点"><span className="wide-only">设为</span>章节</button>
+                  <button className="btn btn--link" disabled={busy} onClick={clearWordSelection} aria-label="取消选择">取消</button>
+                </div>
               </div>
+              <div className="word-selection-spacer" aria-hidden="true" />
+              </>
             )}
           </Card>
         </div>
@@ -1093,7 +1101,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
           <WarningList warnings={warnings} />
         </Card>
         </aside>
-        {(compactTools || !toolsOpen) && (
+        {(compactTools || !toolsOpen) && !(compactTools && wordSelection) && (
           <button ref={toolsTriggerRef} type="button" aria-expanded={toolsOpen} aria-controls="review-tools-panel" className={`review-tools-fab${pending.length > 0 ? ' review-tools-fab--warn' : ''}`} onClick={() => { if (pending.length) { setFilter('review'); jumpToDecision(pending[0].id) } else setToolsOpen(true) }}>
             {pending.length > 0 ? `待确认 ${pending.length} 条` : '剪辑决策'} <span aria-hidden="true">▲</span>
           </button>

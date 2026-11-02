@@ -1747,3 +1747,42 @@ select:disabled { opacity: .55; cursor: not-allowed; }
 .session-cover--empty { border-style: dashed; }
 .session-row__header { gap: 14px; }
 .session-row__header .session-row__title { flex: 1; }
+
+/* ─────────────── 选词操作栏 + 手机端剪辑 ─────────────── */
+.word-selection-bar { display: grid; gap: 8px; margin-top: 10px; padding: 10px 12px; background: var(--surface-2); border-radius: var(--radius); }
+.word-selection-bar__summary { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; min-width: 0; }
+.word-selection-bar__text { min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.word-selection-bar__time { color: var(--text-faint); font-size: var(--step--1); font-variant-numeric: tabular-nums; }
+.word-selection-bar__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.word-selection-spacer { display: none; }
+
+/* 选中范围是一整段连续高亮，而不是每个词一个框 */
+.transcript-paragraph .transcript-word.tok--selected,
+.transcript-paragraph .transcript-pause.tok--selected { outline: none; background: var(--primary-dim); box-shadow: inset 0 -2px 0 var(--primary); border-radius: 0; }
+
+/* 手机预览：让底部导航、浮动按钮、操作栏都相对预览框定位，而不是铺满整个浏览器窗口 */
+.viewport-host[data-vp='mobile'] .app-root { transform: translateZ(0); }
+
+@container app (max-width: 860px) {
+  /* 更大的点击区域：加大行高，词的内边距撑满整行高度，相邻行之间不留空隙 */
+  .transcript { font-size: 17px; line-height: 2.15; padding: 12px 10px; max-height: none; }
+  .transcript-paragraph .transcript-word { padding-block: 8px; }
+  .transcript-paragraph .transcript-pause { padding: 8px 4px; font-size: 12px; }
+  .chapter-marker { padding: 4px 10px; }
+
+  .word-selection-bar {
+    position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); z-index: 50; margin: 0;
+    border-radius: 14px 14px 0 0; border: 1px solid var(--hairline); border-bottom: 0;
+    padding: 10px max(12px, env(safe-area-inset-right, 0px)) 10px max(12px, env(safe-area-inset-left, 0px));
+    background: var(--surface-2); box-shadow: 0 -6px 24px rgb(0 0 0 / 35%);
+  }
+  .word-selection-bar__actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 6px; }
+  .word-selection-bar__actions .btn { min-height: 46px; padding: 6px 4px; justify-content: center; white-space: nowrap; }
+  .word-selection-spacer { display: block; height: 128px; }
+  .wide-only { display: none; }
+
+  /* 顶栏：真手机上不需要电脑端/手机端切换；演示标签缩短 */
+  .viewport-host:not([data-vp='mobile']) .vp-toggle { display: none; }
+  .demo-badge { font-size: 11px; padding: 1px 8px; }
+}
+.word-selection-bar__actions .btn { gap: 0; }
