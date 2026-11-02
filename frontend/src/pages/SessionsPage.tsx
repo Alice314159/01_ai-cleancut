@@ -243,6 +243,9 @@ export function SessionsPage({
           return (
             <div className="session-row" key={r.id}>
               <div className="session-row__header">
+                <button type="button" className={`session-cover${r.coverVersion ? '' : ' session-cover--empty'}`} onClick={open} tabIndex={-1} aria-hidden="true">
+                  {r.coverVersion ? <img src={api.coverUrl(r.id, r.coverVersion)} alt="" loading="lazy" /> : <span>{r.title.trim().slice(0, 1) || '·'}</span>}
+                </button>
                 <button className="session-row__title" aria-label={`打开会话 ${r.title}`} onClick={open}>{r.title}</button>
                 <div className="session-row__acts">
                   <button className="iconbtn" aria-label="重命名或修改项目" title="重命名或修改项目" disabled={busy} onClick={() => startEdit(r)}>✎</button>

@@ -36,6 +36,8 @@ export type SessionListItem = {
   totalDurationMs: number
   /** ISO 8601；迁移前的旧会话没有记录创建时间，为 null。 */
   createdAt: string | null
+  /** 有封面时为封面版本号 */
+  coverVersion?: string | null
 }
 
 /** 会话详情，对应后端 RecordingSessionOut。 */

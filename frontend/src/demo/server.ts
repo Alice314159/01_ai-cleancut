@@ -159,7 +159,7 @@ function listItem(s: DemoSession) {
   const d = s.detail
   return { id: d.id, title: d.title, projectId: d.projectId, captureMode: d.captureMode, captureStatus: d.captureStatus, localPersistenceStatus: 'NOT_SUPPORTED',
     uploadStatus: d.uploadStatus, serverMergeStatus: d.serverMergeStatus, liveAnalysisStatus: d.liveAnalysisStatus, processingStatus: d.processingStatus,
-    totalDurationMs: d.totalDurationMs, createdAt: d.createdAt }
+    totalDurationMs: d.totalDurationMs, createdAt: d.createdAt, coverVersion: d.coverVersion ?? null }
 }
 
 async function handle(method: string, path: string, query: URLSearchParams, body: Json, form?: FormData): Promise<Response> {

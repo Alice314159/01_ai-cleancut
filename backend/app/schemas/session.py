@@ -88,6 +88,12 @@ class RecordingSessionListItemOut(PersistenceStatusOut):
     processing_status: str
     total_duration_ms: int
     created_at_ns: int = Field(default=0, exclude=True)
+    cover_filename: str | None = Field(default=None, exclude=True)
+
+    @computed_field(alias="coverVersion")
+    @property
+    def cover_version(self) -> str | None:
+        return self.cover_filename.rsplit(".", 1)[0].removeprefix("cover_") if self.cover_filename else None
 
     @computed_field(alias="createdAt")
     @property

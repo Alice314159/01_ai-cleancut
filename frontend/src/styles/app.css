@@ -1738,3 +1738,12 @@ select:disabled { opacity: .55; cursor: not-allowed; }
   .history-bar { justify-content: flex-end; }
   .history-toast { bottom: calc(var(--tabbar-h) + 16px + env(safe-area-inset-bottom, 0px)); }
 }
+
+/* 会话列表封面缩略图：无封面时用标题首字占位，保持各行对齐 */
+.session-row__header { align-items: center; }
+.session-cover { width: 44px; height: 44px; flex-shrink: 0; border-radius: 8px; overflow: hidden; display: grid; place-items: center; padding: 0;
+  background: var(--surface-2); border: 1px solid var(--hairline-soft); color: var(--text-faint); font-size: 1.1rem; }
+.session-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.session-cover--empty { border-style: dashed; }
+.session-row__header { gap: 14px; }
+.session-row__header .session-row__title { flex: 1; }

@@ -100,7 +100,7 @@ class TestSessionCrud:
         body = resp.json()
         assert len(body) == 2
         for item in body:
-            assert set(item.keys()) == {"id", "title", "projectId", "captureMode", "processingStatus", "totalDurationMs", "captureStatus", "localPersistenceStatus", "uploadStatus", "serverMergeStatus", "liveAnalysisStatus", "createdAt"}
+            assert set(item.keys()) == {"id", "title", "projectId", "captureMode", "processingStatus", "totalDurationMs", "captureStatus", "localPersistenceStatus", "uploadStatus", "serverMergeStatus", "liveAnalysisStatus", "createdAt", "coverVersion"}
             assert item["createdAt"].endswith("+00:00")
 
     def test_list_sessions_newest_first(self, client):

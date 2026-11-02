@@ -42,6 +42,9 @@ def test_upload_normalizes_to_bounded_jpeg(client, recording, tmp_path):
     [stream] = probe(client.get(f"/api/sessions/{session_id}/cover").content, tmp_path, "jpg")
     assert (stream["width"], stream["height"]) == (600, 600)
 
+    listed = next(item for item in client.get("/api/sessions").json() if item["id"] == session_id)
+    assert listed["coverVersion"] == second["coverVersion"]
+
     deleted = client.delete(f"/api/sessions/{session_id}/cover")
     assert deleted.json()["coverVersion"] is None
     assert client.get(f"/api/sessions/{session_id}/cover").status_code == 404
