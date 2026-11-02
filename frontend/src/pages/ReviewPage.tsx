@@ -6,7 +6,7 @@ import { WarningList } from '../components/WarningList'
 import { WaveformRibbon } from '../components/WaveformRibbon'
 import { envelope as mockEnvelope } from '../mock/data'
 import { ACTION_LABEL, dur, isCutAction, LOUDNESS_TARGET_LABEL, loudnessSummary, tc } from '../lib/format'
-import { api, DecisionConflictError, type SessionDetail } from '../lib/api'
+import { api, DecisionConflictError, EXPORT_BITRATES, type ExportFormat, type SessionDetail } from '../lib/api'
 import type { AudioVersion, EditDecision, LoudnessTarget, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
 
 const FALLBACK_WAVE = mockEnvelope(190, 19)
@@ -50,6 +50,8 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const [loudnessTarget, setLoudnessTarget] = useState<LoudnessTarget | ''>('')
   const [minPauseMs, setMinPauseMs] = useState(1500)
   const [pauseMessage, setPauseMessage] = useState('')
+  const [exportBitrate, setExportBitrate] = useState(192)
+  const [exporting, setExporting] = useState<ExportFormat | null>(null)
   const [rendering, setRendering] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -305,6 +307,19 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     link.href = url; link.download = 'transcript-master.srt'
     document.body.appendChild(link); link.click(); link.remove()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  })
+
+  const handleExportAudio = (format: ExportFormat) => perform(async () => {
+    if (!rendered) return
+    setExporting(format)
+    try {
+      const { blob, filename } = await api.exportAudio(sessionId, rendered.version.id, format, exportBitrate)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url; link.download = filename
+      document.body.appendChild(link); link.click(); link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } finally { setExporting(null) }
   })
 
   const handleExportTranscript = (format: 'txt' | 'srt') => perform(async () => {
@@ -783,6 +798,20 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
               <a className="btn" href={api.downloadUrl(sessionId, rendered.version.id)}>{rendered.stale ? '下载上一次成片 WAV' : '下载成片 WAV'}</a>
               {!rendered.hasReplacements && <button className="btn" disabled={busy} onClick={handleExportMaster}>{rendered.stale ? '导出上一次成片 SRT' : '导出成片 SRT'}</button>}
             </div>
+            <div className="render-export" style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                码率
+                <select aria-label="导出码率" value={exportBitrate} disabled={busy} onChange={(event) => setExportBitrate(Number(event.target.value))}>
+                  {EXPORT_BITRATES.map((kbps) => <option key={kbps} value={kbps}>{kbps} kbps{kbps === 192 ? '（推荐）' : ''}</option>)}
+                </select>
+              </label>
+              {(['mp3', 'm4a'] as const).map((format) => (
+                <button key={format} className="btn" disabled={busy} onClick={() => handleExportAudio(format)}>
+                  {exporting === format ? '转码中…' : `下载 ${format.toUpperCase()}`}
+                </button>
+              ))}
+            </div>
+            <p className="card__hint">MP3 兼容性最好；M4A（AAC）同码率下音质更好，适合播客平台和苹果设备。首次导出需转码，之后直接下载。</p>
             {rendered.hasReplacements && <RenderTranscriptPanel key={rendered.version.id} sessionId={sessionId} versionId={rendered.version.id} audioRef={masterAudioRef} stale={rendered.stale} />}
           </div>
         )}

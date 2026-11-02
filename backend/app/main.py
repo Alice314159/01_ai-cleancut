@@ -29,6 +29,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # 前端用 fetch 下载导出文件时需要读到服务端给的文件名。
+    expose_headers=["Content-Disposition"],
 )
 
 app.include_router(sessions.router)

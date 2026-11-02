@@ -86,6 +86,20 @@ class ApiError extends Error {
   }
 }
 
+export type ExportFormat = 'mp3' | 'm4a'
+export const EXPORT_BITRATES = [96, 128, 192, 256, 320] as const
+
+/** 解析 Content-Disposition 里的文件名，优先 RFC 5987 的 filename*（支持中文）。 */
+export function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null
+  const encoded = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(header)
+  if (encoded) {
+    try { return decodeURIComponent(encoded[1].trim().replace(/^"|"$/g, '')) } catch { /* fall through */ }
+  }
+  const plain = /filename\s*=\s*"?([^";]+)"?/.exec(header)
+  return plain ? plain[1].trim() : null
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // FormData bodies need the browser's own multipart boundary header; setting
   // Content-Type ourselves here would strip it and break the upload.
@@ -247,6 +261,17 @@ export const api = {
       throw new Error(error?.detail ?? '成片字幕导出失败')
     }
     return response.blob()
+  },
+  /** 转码为 MP3 / M4A 下载；返回文件内容和服务端建议的文件名。 */
+  async exportAudio(id: string, versionId: string, format: ExportFormat, bitrateKbps: number) {
+    const query = new URLSearchParams({ format, bitrate: String(bitrateKbps) })
+    const response = await fetch(`${API_BASE}/api/sessions/${id}/versions/${versionId}/export?${query}`)
+    if (!response.ok) {
+      const error = await response.json().catch(() => null)
+      throw new Error(typeof error?.detail === 'string' ? error.detail : '音频导出失败')
+    }
+    const filename = filenameFromDisposition(response.headers.get('Content-Disposition')) ?? `audio.${format}`
+    return { blob: await response.blob(), filename }
   },
   async downloadTranscript(id: string, transcriptionJobId: string, format: 'txt' | 'srt') {
     const query = new URLSearchParams({ transcriptionJobId, format })

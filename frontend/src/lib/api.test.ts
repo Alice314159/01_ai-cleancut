@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, DecisionConflictError } from './api'
+import { api, DecisionConflictError, filenameFromDisposition } from './api'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -86,5 +86,38 @@ describe('api request handling', () => {
 
     const file = new File(['x'], 'clip.wav', { type: 'audio/wav' })
     await expect(api.importAudio('s_1', file)).rejects.toThrow('该会话已导入过音频，无法重复导入')
+  })
+})
+
+describe('filenameFromDisposition', () => {
+  it('prefers the RFC 5987 encoded name so Chinese titles survive', () => {
+    expect(filenameFromDisposition(`attachment; filename*=utf-8''%E7%AC%AC%E4%B8%80%E6%9C%9F-%E6%88%90%E7%89%87.mp3`)).toBe('第一期-成片.mp3')
+  })
+
+  it('falls back to the plain filename parameter', () => {
+    expect(filenameFromDisposition('attachment; filename="episode-1.m4a"')).toBe('episode-1.m4a')
+  })
+
+  it('returns null when no name is given', () => {
+    expect(filenameFromDisposition(null)).toBeNull()
+    expect(filenameFromDisposition('inline')).toBeNull()
+  })
+})
+
+describe('exportAudio', () => {
+  it('requests the chosen format and bitrate and returns the server filename', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('mp3-bytes', {
+      status: 200, headers: { 'Content-Disposition': `attachment; filename*=utf-8''a%E6%88%90%E7%89%87.mp3` },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await api.exportAudio('rs_1', 'av_1', 'mp3', 256)
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/sessions/rs_1/versions/av_1/export?format=mp3&bitrate=256')
+    expect(result.filename).toBe('a成片.mp3')
+    expect(await result.blob.text()).toBe('mp3-bytes')
+  })
+
+  it('surfaces the server error message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(503, { detail: '本机 ffmpeg 缺少 aac 编码器' })))
+    await expect(api.exportAudio('rs_1', 'av_1', 'm4a', 192)).rejects.toThrow('缺少 aac 编码器')
   })
 })

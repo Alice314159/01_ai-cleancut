@@ -1,6 +1,7 @@
 from app.models import RenderTranscriptionJob
 import os
 import shutil
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -34,7 +35,7 @@ from app.schemas import (
     UpdateSessionIn,
     WarningOut,
 )
-from app.services import audio_analysis, storage, stub_pipeline, transcription
+from app.services import audio_analysis, audio_export, storage, stub_pipeline, transcription
 from app.routers.recording_ws import stop_recording
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -271,6 +272,42 @@ def get_version_audio(session_id: str, version_id: str, download: bool = False, 
         filename=f"{version.version_type}{path.suffix}",
         content_disposition_type="attachment" if download else "inline",
     )
+
+
+@router.get("/{session_id}/versions/{version_id}/export")
+def export_version_audio(
+    session_id: str,
+    version_id: str,
+    format: Literal["mp3", "m4a"] = "mp3",
+    bitrate: int = Query(default=audio_export.DEFAULT_BITRATE_KBPS),
+    db: Session = Depends(get_db),
+):
+    """
+    转码为 MP3 / M4A(AAC) 下载，供发布到播客平台或分享。版本不可变，
+    结果按 (版本, 格式, 码率) 缓存，重复下载不重复编码。
+    """
+    session = _get_session_or_404(db, session_id)
+    version = db.get(AudioVersion, version_id)
+    if version is None or version.session_id != session_id:
+        raise HTTPException(status_code=404, detail="version not found")
+    if not version.filename:
+        raise HTTPException(status_code=404, detail="this version has no audio file")
+    if bitrate not in audio_export.BITRATES_KBPS:
+        raise HTTPException(status_code=422, detail=f"码率需为 {', '.join(map(str, audio_export.BITRATES_KBPS))} kbps 之一")
+    source = Path(storage.session_dir(session_id)) / version.filename
+    if not source.exists():
+        raise HTTPException(status_code=404, detail="audio file missing on disk")
+    title, version_type = session.title, version.version_type
+    db.close()  # 转码可能耗时较长，不占用数据库连接
+    try:
+        path = audio_export.ensure_export(session_id, version_id, source, format, bitrate, title=title)
+    except audio_export.EncoderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except audio_export.ExportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    spec = audio_export.FORMATS[format]
+    return FileResponse(path, media_type=spec.media_type,
+                        filename=audio_export.download_name(title, version_type, spec.extension))
 
 
 @router.get("/{session_id}/roles", response_model=list[RoleAssignmentOut])
