@@ -1622,3 +1622,75 @@ input, select { accent-color: var(--primary); }
 .master-transcript__text { max-height: 260px; overflow: auto; padding: 12px; line-height: 2; }
 .master-transcript__text button { display: inline; white-space: pre-wrap; padding: 0; text-align: left; }
 .master-transcript__text button:hover { background: var(--primary-dim); }
+
+/* ─────────────── 界面整理（统一控件 / 顶栏 / 剪辑导出页布局） ─────────────── */
+
+/* 预览切换收进顶栏，不再浮在内容上，底部浮层也不必再为它留位置。 */
+:root { --previewbar-h: 0px; }
+.topbar { display: flex; align-items: stretch; min-width: 0; flex-shrink: 0; border-bottom: 1px solid var(--hairline); background: var(--surface); }
+.topbar .timebase { flex: 1; min-width: 0; border-bottom: 0; }
+.vp-toggle { display: flex; align-items: center; gap: 4px; padding: 0 12px; flex-shrink: 0; }
+.vp-toggle button { padding: 3px 10px; border-radius: 999px; font-family: var(--font-data); font-size: var(--step--1); color: var(--text-faint); }
+.vp-toggle button[aria-pressed='true'] { background: var(--surface-3); color: var(--text); }
+
+/* 统一下拉框：此前只有会话页筛选栏有深色样式，其余是浏览器默认白底。 */
+select {
+  font: inherit; font-size: var(--step--1); color: var(--text); background-color: var(--ink);
+  border: 1px solid var(--hairline); border-radius: var(--radius); padding: 7px 30px 7px 10px; min-height: 34px;
+  color-scheme: dark; appearance: none; cursor: pointer; max-width: 100%;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%), linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat;
+}
+select:hover:not(:disabled) { border-color: var(--text-faint); }
+select:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+select:disabled { opacity: .55; cursor: not-allowed; }
+.inline-field { display: inline-flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: var(--step--1); }
+.cut-field select { width: 100%; }
+
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 80; display: flex; gap: 12px; align-items: center;
+  max-width: min(560px, calc(100% - 32px)); padding: 10px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--hairline);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 35%); }
+.toast--error span { color: var(--sig-danger); }
+
+/* 剪辑导出页：标题 + 一行概况指标，替代原来三张大统计卡。 */
+.review-head { align-items: flex-end; }
+.review-metrics { display: flex; gap: 8px; margin: 0; flex-wrap: wrap; }
+.review-metrics > div { padding: 8px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--hairline-soft); min-width: 96px; }
+.review-metrics dt { font-size: var(--step--1); color: var(--text-faint); }
+.review-metrics dd { margin: 2px 0 0; font-size: 1.15rem; font-variant-numeric: tabular-nums; color: var(--text); }
+.review-metrics .is-ok dd { color: var(--sig-committed); }
+.review-metrics .is-warn { border-color: var(--sig-provisional); }
+.review-metrics .is-warn dd { color: var(--sig-provisional); }
+.review-timeline { margin: 0 0 var(--sp-4); }
+.review-player { margin-bottom: 12px; }
+.empty-state { display: grid; justify-items: start; gap: 10px; padding: 20px; margin-top: 12px; border: 1px dashed var(--hairline); border-radius: 10px; color: var(--text-dim); }
+.empty-state p { margin: 0; }
+.decision-batch-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* 生成与导出：全宽，导出按"音频 / 字幕与文本"分组。 */
+#review-output { margin-top: var(--sp-4); }
+#review-output audio { width: 100%; display: block; color-scheme: dark; }
+#review-output .render-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+#review-output .render-actions > .btn--primary { margin-left: auto; min-width: 180px; justify-content: center; }
+.export-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+.export-group { padding: 14px 16px; border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.export-group h3 { margin: 0 0 10px; font-size: var(--step--1); font-weight: 600; color: var(--text-dim); letter-spacing: .04em; }
+.export-group__row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.export-group .card__hint { margin: 10px 0 0; }
+
+@container app (max-width: 860px) {
+  .review-head { align-items: stretch; }
+  .review-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .review-metrics > div { min-width: 0; padding: 6px 10px; }
+  .review-metrics dd { font-size: 1rem; }
+  .export-groups { grid-template-columns: minmax(0, 1fr); }
+  #review-output .render-actions > .btn--primary { margin-left: 0; width: 100%; }
+  .vp-toggle { padding: 0 8px; }
+  .topbar .timebase { padding: 0 var(--sp-4); }
+}
+.transcript-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 4px; }
+@container app (max-width: 860px) {
+  .topbar .timebase__note { display: none; }
+}
+.demo-badge { align-self: center; flex-shrink: 0; margin-right: 4px; padding: 2px 10px; border-radius: 999px; font-size: var(--step--1);
+  color: var(--sig-provisional); background: var(--surface); border: 1px solid var(--sig-provisional); cursor: help; position: relative; z-index: 1; }

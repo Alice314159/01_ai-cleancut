@@ -111,7 +111,7 @@ export function EnhancePage({
   const pageHead = (
     <div className="page-head">
       <div>
-        <div className="eyebrow">可选 · 音质优化</div>
+        <div className="eyebrow">02 · 音质优化（可选）</div>
         <h1>音频增强</h1>
         <p>
           增强只改变成片音质，不改变识别用的时间基准。所以调整强度不会让已经做好的剪辑决策失效。

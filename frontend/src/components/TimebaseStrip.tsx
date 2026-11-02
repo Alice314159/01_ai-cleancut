@@ -1,5 +1,13 @@
 import type { AudioVersion, RoleAssignment } from '../types/api'
 
+/** 版本类型的用户可读名称；内部角色名（TIMEBASE / RENDER_SOURCE）不直接展示给用户。 */
+export const VERSION_LABEL: Record<string, string> = {
+  original: '原始录音',
+  denoised: '降噪版本',
+  master: '剪辑成片',
+  retake: '重录片段',
+}
+
 /**
  * 时间基准条 — 常驻窄条，不可折叠、不可关闭。
  *
@@ -32,9 +40,9 @@ export function TimebaseStrip({
   return (
     <div className="timebase" role="status" aria-label="音频版本角色">
       <div className="timebase__slot">
-        <span className="timebase__key">时间基准</span>
-        <span className="timebase__val">{tbVersion?.versionType ?? '—'}</span>
-        <span className="timebase__lock" title="冻结后不可变更">
+        <span className="timebase__key">时间轴</span>
+        <span className="timebase__val">{tbVersion ? VERSION_LABEL[tbVersion.versionType] ?? tbVersion.versionType : '—'}</span>
+        <span className="timebase__lock" title="剪辑、转写和字幕都以这条时间轴计时，录制完成后固定不变">
           ▮
         </span>
       </div>
@@ -42,11 +50,11 @@ export function TimebaseStrip({
       <div className="timebase__sep" />
 
       <div className="timebase__slot">
-        <span className="timebase__key">试听 / 渲染</span>
-        <span className="timebase__val" title={rdVersion?.id}>{rdVersion?.versionType ?? '—'}</span>
+        <span className="timebase__key">剪辑音源</span>
+        <span className="timebase__val" title={rdVersion?.id}>{rdVersion ? VERSION_LABEL[rdVersion.versionType] ?? rdVersion.versionType : '—'}</span>
         {render?.upgradedFrom && (
           <span className="timebase__up" title="音频源已更新；之前生成的成片需要重新生成才能反映新版本">
-            ↑ 源已更新
+            ↑ 已更新
           </span>
         )}
       </div>
@@ -55,7 +63,7 @@ export function TimebaseStrip({
         <>
           <div className="timebase__sep" />
           <span className="timebase__note">
-            {!rdVersion || !tbVersion ? '音频源尚未就绪' : '与基准不同版本 · 剪辑时间仍按完整录音计算'}
+            {!rdVersion || !tbVersion ? '音频尚未就绪' : '剪辑使用处理后的音频，时间仍按原始录音计算'}
           </span>
         </>
       )}

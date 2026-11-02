@@ -1,7 +1,8 @@
 import { RenderTranscriptPanel } from '../components/RenderTranscriptPanel'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { RetakeDialog, type RetakeTarget } from '../components/RetakeDialog'
-import { Card, Chip, Stat } from '../components/Bits'
+import { Card, Chip } from '../components/Bits'
+import { isBoolean, oneOf, usePref } from '../lib/prefs'
 import { WarningList } from '../components/WarningList'
 import { WaveformRibbon } from '../components/WaveformRibbon'
 import { envelope as mockEnvelope } from '../mock/data'
@@ -14,8 +15,9 @@ const PAUSE_THRESHOLD_MS = 400
 // 后端现在会尽量把识别到的标点带回来（较新的转写才有）；没有标点的旧转写，
 // 再退回用比词间停顿更长的停顿去近似"这句话说完了"。
 const SENTENCE_PAUSE_MS = 600
+const LANGUAGE_LABEL: Record<string, string> = { zh: '中文', en: '英文', ja: '日文', ko: '韩文' }
 const SENTENCE_END_RE = /[。！？.!?][”’"']?\s*$/
-const TOOLS_SECTION_IDS = new Set(['review-output', 'review-advanced', 'review-decisions'])
+const TOOLS_SECTION_IDS = new Set(['review-advanced', 'review-decisions'])
 
 /** 转写词和"停顿间隙"共用的可选中范围——两者都只需要这三个字段。 */
 type SelectableSpan = { jobId?: string | null; startMs: number; endMs?: number | null }
@@ -46,11 +48,12 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const busyRef = useRef(false)
   const loadRevisionRef = useRef(0)
   const [conflict, setConflict] = useState<{ current: EditDecision; intended: boolean | null } | null>(null)
-  const [smoothCuts, setSmoothCuts] = useState(false)
-  const [loudnessTarget, setLoudnessTarget] = useState<LoudnessTarget | ''>('')
-  const [minPauseMs, setMinPauseMs] = useState(1500)
+  // 生成与导出选项记在本机，下次打开默认带出。
+  const [smoothCuts, setSmoothCuts] = usePref('smoothCuts', false, isBoolean)
+  const [loudnessTarget, setLoudnessTarget] = usePref<LoudnessTarget | ''>('loudnessTarget', '', oneOf('', 'podcast', 'broadcast'))
+  const [minPauseMs, setMinPauseMs] = usePref('minPauseMs', 1500, oneOf(1000, 1500, 2000, 3000))
   const [pauseMessage, setPauseMessage] = useState('')
-  const [exportBitrate, setExportBitrate] = useState(192)
+  const [exportBitrate, setExportBitrate] = usePref<number>('exportBitrate', 192, oneOf<number>(...EXPORT_BITRATES))
   const [exporting, setExporting] = useState<ExportFormat | null>(null)
   const [rendering, setRendering] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -576,6 +579,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
 
   const playingSentenceIdx = playingTokenId != null ? sentenceInfo.tokenToSentence.get(playingTokenId) : undefined
 
+  const transcriptExportable = transcript.length > 0 && transcript.every((t) => t.jobId && t.endMs != null)
   const ready = loaded && session?.liveAnalysisStatus === 'FINALIZED' && !!source
   const nextStep = pending.length
     ? { label: '去确认建议', target: 'review-decisions' }
@@ -595,34 +599,23 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
         try { await loadAll(); onDataChange() } catch { setError('重录已保存，请刷新数据查看最新剪辑。') }
       }} />}
       {error && <div className="card" role="alert">{error} <button className="btn" disabled={busy} onClick={() => void perform(async () => { await loadAll() })}>刷新数据</button></div>}
-      <div className="page-head">
+      <div className="page-head review-head">
         <div>
-          <div className="eyebrow">02 · 剪辑与导出</div>
-          <h1>确认剪辑</h1>
-          <p>
-            试听完整音频，删除不需要的内容，或选中不满意的片段重新录制，再生成成片。时间均以剪辑前的录音为准。
-          </p>
+          <div className="eyebrow">03 · 剪辑与导出</div>
+          <h1>剪辑与导出</h1>
+          <p>在转写里选中要删的内容或重录，确认建议后生成成片并导出。时间均以剪辑前的录音为准。</p>
         </div>
-        <div className="segmented" role="group" aria-label="筛选">
-          <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
-            全部 {decisions.length}
-          </button>
-          <button aria-pressed={filter === 'review'} onClick={() => setFilter('review')}>
-            待确认 {pending.length}
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid--3 review-summary">
-        <Stat k={savedMs >= 0 ? "预计缩短" : "预计增加"} v={dur(Math.abs(savedMs))} note={totalMs > 0 ? `原长 ${dur(totalMs)}` : undefined} tone={savedMs > 0 ? 'ok' : undefined} />
-        <Stat k="待人工确认" v={String(pending.length)} note="先接受或拒绝，再生成成片" tone={pending.length > 0 ? 'warn' : 'ok'} />
-        <Stat k="决策总数" v={String(decisions.length)} />
+        <dl className="review-metrics" aria-label="剪辑概况">
+          <div><dt>原长</dt><dd>{totalMs > 0 ? dur(totalMs) : '—'}</dd></div>
+          <div className={savedMs > 0 ? 'is-ok' : undefined}><dt>{savedMs >= 0 ? '预计缩短' : '预计增加'}</dt><dd>{dur(Math.abs(savedMs))}</dd></div>
+          <div className={pending.length ? 'is-warn' : undefined}><dt>待确认</dt><dd>{pending.length}</dd></div>
+        </dl>
       </div>
 
       <section className="workflow-guide review-workflow" aria-label="剪辑流程">
         <ol className="workflow-steps">
           <li aria-current={!ready ? 'step' : undefined}>1 · 准备音频{ready ? ' ✓' : ''}</li><li aria-current={ready && decisions.length === 0 ? 'step' : undefined}>2 · 转写与选段</li>
-          <li aria-current={pending.length ? 'step' : undefined}>3 · 确认剪辑</li><li aria-current={ready && decisions.length > 0 && !pending.length ? 'step' : undefined}>4 · 试听导出</li>
+          <li aria-current={pending.length ? 'step' : undefined}>3 · 确认建议</li><li aria-current={ready && decisions.length > 0 && !pending.length ? 'step' : undefined}>4 · 生成导出</li>
         </ol>
         <p role="status">{!ready ? (session?.liveAnalysisStatus === 'FAILED' ? '音频分析失败，请重新录制或导入。' : '正在准备音频，请等待分析完成。') : asrRunning ? '正在转写，你可以先试听音频。' : conflict ? '请先处理下方的选择冲突。' : pending.length ? <>还有 <button type="button" className="pill-badge pill-badge--warn" onClick={() => { setFilter('review'); goToSection('review-decisions') }}>{pending.length} 条待确认</button> 建议，接受后才会删除。</> : rendered && !rendered.stale ? '成片已生成，试听满意后下载音频和字幕。' : !transcript.length ? '先转写文字，再直接选择需要删除的词句；也可以用秒数手动剪辑。' : decisions.length === 0 ? '转写已完成。点击文字选中要删除的内容，或生成剪辑建议。' : '选择已确认，可以生成成片了。'}</p>
         <div className="workflow-actions">
@@ -652,21 +645,43 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
       </Card>}
       {!ready && <div className="card" role="status">{session?.liveAnalysisStatus === 'FAILED' ? '音频分析失败，请重新录制或重新导入音频。' : '请先完成录制或导入音频，分析就绪后即可剪辑。'}</div>}
 
+      {totalMs > 0 && (
+        <div className="review-timeline">
+          <WaveformRibbon
+            title="时间线 · 判定"
+            hint={waveform ? '波形来自真实录音振幅' : '波形为占位曲线（未取到真实录音数据）'}
+            envelope={waveform ?? FALLBACK_WAVE}
+            durationMs={totalMs}
+            decisions={decisions}
+          />
+        </div>
+      )}
+
       <div className="review-workspace">
         <div className="review-transcript-column">
-          <Card id="review-transcript" title="语音转写" hint="音频在本机处理。首次使用会下载模型；时间戳为模型估计，删除前请试听核对。">
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <label>识别语言 <select aria-label="识别语言" value={language} disabled={busy || asrRunning} onChange={(event) => setLanguage(event.target.value as 'auto' | 'zh' | 'en')}>
+          <Card id="review-transcript" title="转写与选词" hint="点击文字试听；点起点和终点或拖选来选中，再删除或重录。时间戳为模型估计，删除前请试听核对。">
+            <div className="review-player">
+              {source && <audio ref={audioRef} onTimeUpdate={(event) => {
+          if (previewEndRef.current != null && event.currentTarget.currentTime >= previewEndRef.current) {
+            event.currentTarget.pause()
+            previewEndRef.current = null
+          }
+          const currentMs = event.currentTarget.currentTime * 1000
+          const active = transcript.find((t) => t.jobId && t.endMs != null && t.startMs <= currentMs && currentMs < t.endMs)
+          setPlayingTokenId((prev) => { const next = active?.id ?? null; return next === prev ? prev : next })
+        }} onPlay={pauseOtherReviewAudio} onPause={() => { previewEndRef.current = null; setPreviewDecisionId(null); setPlayingTokenId(null) }} aria-label="剪辑前试听" controls preload="metadata" src={api.audioUrl(sessionId, source.id)} style={{ width: '100%' }} />}
+              {!source && <p className="card__hint">音频准备好后可在这里试听剪辑前的录音。</p>}
+            </div>
+            <div className="transcript-toolbar">
+              <label className="inline-field">识别语言 <select aria-label="识别语言" value={language} disabled={busy || asrRunning} onChange={(event) => setLanguage(event.target.value as 'auto' | 'zh' | 'en')}>
                 <option value="auto">自动识别</option><option value="zh">中文</option><option value="en">英文</option>
               </select></label>
               <button className={transcript.length ? 'btn' : 'btn btn--primary'} onClick={handleTranscribe} disabled={busy || !ready || asrRunning}>
-                {asrRunning ? '转写进行中…' : '开始本机转写'}
+                {asrRunning ? '转写进行中…' : transcript.length ? '重新转写' : '开始本机转写'}
               </button>
+              {transcript.length > 0 && <button className="btn" onClick={handleSuggest} disabled={busy || !ready || asrRunning || transcript.some((token) => !token.jobId || token.endMs == null)}
+                title="相邻重复会在转写后自动提示；语气词需手动查找。建议需试听确认。">查找重复与语气词</button>}
             </div>
-            {transcript.length > 0 && <>
-              <button className="btn" onClick={handleSuggest} disabled={busy || !ready || asrRunning || transcript.some((token) => !token.jobId || token.endMs == null)}>查找重复与语气词</button>
-              <p className="card__hint">相邻重复会自动提示，语气词可手动查找；建议需试听确认。</p>
-            </>}
             {pendingRepetitions > 0 && <button className="pill-badge pill-badge--warn" onClick={() => goToSection('review-decisions')}>疑似重复 {pendingRepetitions} 处 · 复核 →</button>}
             {suggestionMessage && <p role="status">{suggestionMessage}</p>}
             {asrJob && <p role="status">{
@@ -674,21 +689,19 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
               asrJob.status === 'LOADING_MODEL' ? '正在加载模型；首次下载可能需要几分钟…' :
               asrJob.status === 'TRANSCRIBING' ? `正在转写 ${Math.round(asrJob.progress * 100)}%` :
               asrJob.status === 'FAILED' ? asrJob.errorMessage :
-              `转写完成 · ${asrJob.detectedLanguage ?? '未知语言'}`
+              `转写完成 · ${LANGUAGE_LABEL[asrJob.detectedLanguage ?? ''] ?? asrJob.detectedLanguage ?? '未知语言'}`
             }</p>}
             {transcript.length === 0 && <p className="card__hint">{asrJob?.status === 'COMPLETED' ? '未识别到可转写的语音。' : '转写完成后，点击起点和终点，或拖过多个词来选择，再点“删除选中文字”。词间停顿也可选择删除。'}</p>}
             {transcript.some((token) => !token.jobId) && <p className="card__hint">未标记时间的文字来自历史候选，不是语音识别结果。</p>}
             {transcript.some((token) => token.jobId) && <details className="transcript-help"><summary>选词与剪辑说明</summary><p className="card__hint">点击一个词确定起点，再点另一词扩展范围；也可直接拖选。手机和电脑操作一致。“‧‧‧0.8s”表示可选的词间停顿。选中后可删除或重录；导出转写仍对应剪辑前录音。</p></details>}
-            {transcript.length > 0 && <details className="export-menu">
-              <summary className="btn btn--link">导出转写 ▾</summary>
-              <div className="export-menu__list" role="menu">
-                {(['txt', 'srt'] as const).map((format) => <button key={format} role="menuitem"
-                  disabled={busy || asrRunning || !transcript.length || transcript.some((t) => !t.jobId || t.endMs == null)}
-                  onClick={(event) => { handleExportTranscript(format); event.currentTarget.closest('details')?.removeAttribute('open') }}>{format.toUpperCase()} 文本</button>)}
-              </div>
-            </details>}
 
-            <div className="transcript">
+            {transcript.length === 0 && ready && !asrRunning && (
+              <div className="empty-state">
+                <p>还没有转写文字。点上方“开始本机转写”，识别在本机完成，首次会下载模型。</p>
+                <p className="card__hint">不需要按文字剪辑时，也可以在右侧“辅助剪辑”中按秒数剪辑，或直接到下方生成导出。</p>
+              </div>
+            )}
+            {transcript.length > 0 && <div className="transcript">
               {transcriptParagraphs.map((paragraph) => <p className="transcript-paragraph" key={paragraph[0].token.id}>{paragraph.map(({ token, index }) => {
                 const prev = transcript[index - 1]
                 const gapMs = prev?.jobId && prev.endMs != null && token.jobId && token.endMs != null
@@ -741,7 +754,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                   </span>
                 )
               })}</p>)}
-            </div>
+            </div>}
             {wordSelection && (
               <div className="word-selection-bar" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 8, padding: 8, background: 'var(--surface-2)', borderRadius: 'var(--radius)' }}>
                 <span className="card__hint" style={{ margin: 0 }}>
@@ -755,92 +768,17 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
           </Card>
         </div>
         {toolsOpen && <div className="review-tools-backdrop" onClick={() => setToolsOpen(false)} />}
-        <aside ref={toolsRef} id="review-tools-panel" role={compactTools ? "dialog" : undefined} aria-modal={compactTools && toolsOpen ? true : undefined} aria-hidden={compactTools && !toolsOpen ? true : undefined} className={`review-tools-column${toolsOpen ? ' review-tools-column--open' : ''}`} aria-label="试听与剪辑工具">
+        <aside ref={toolsRef} id="review-tools-panel" role={compactTools ? "dialog" : undefined} aria-modal={compactTools && toolsOpen ? true : undefined} aria-hidden={compactTools && !toolsOpen ? true : undefined} className={`review-tools-column${toolsOpen ? ' review-tools-column--open' : ''}`} aria-label="剪辑决策与辅助工具">
           <div className="review-tools-drawer-head">
-            <strong>试听与剪辑工具</strong>
+            <strong>剪辑决策与辅助工具</strong>
             <button type="button" className="btn btn--link" onClick={() => setToolsOpen(false)}>收起 ✕</button>
           </div>
-      <Card id="review-output" title="试听与生成" hint="先试听剪辑前音频。确认删除内容后生成成片；重叠区间只删除一次。">
-        {source && <audio ref={audioRef} onTimeUpdate={(event) => {
-          if (previewEndRef.current != null && event.currentTarget.currentTime >= previewEndRef.current) {
-            event.currentTarget.pause()
-            previewEndRef.current = null
-          }
-          const currentMs = event.currentTarget.currentTime * 1000
-          const active = transcript.find((t) => t.jobId && t.endMs != null && t.startMs <= currentMs && currentMs < t.endMs)
-          setPlayingTokenId((prev) => { const next = active?.id ?? null; return next === prev ? prev : next })
-        }} onPlay={pauseOtherReviewAudio} onPause={() => { previewEndRef.current = null; setPreviewDecisionId(null); setPlayingTokenId(null) }} aria-label="剪辑前试听" controls preload="metadata" src={api.audioUrl(sessionId, source.id)} style={{ width: '100%' }} />}
-        <div className="render-actions">
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input type="checkbox" checked={smoothCuts} disabled={busy} onChange={(event) => setSmoothCuts(event.target.checked)} />
-            平滑剪辑
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            响度标准化
-            <select aria-label="响度标准化" value={loudnessTarget} disabled={busy} onChange={(event) => setLoudnessTarget(event.target.value as LoudnessTarget | '')}>
-              <option value="">不调整</option>
-              {Object.entries(LOUDNESS_TARGET_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
-          </label>
-          <button className="btn btn--primary" disabled={busy || !ready || pending.length > 0 || !!conflict} onClick={handleRender}>
-            {rendering ? '渲染中…' : '生成剪辑音频'}
-          </button>
-        </div>
-        {pending.length > 0 && <button className="review-pending-pill" onClick={() => goToSection('review-decisions')}>⚠ 待确认 {pending.length} 条 · 去处理 →</button>}
 
-        {rendered && (
-          <div style={{ marginTop: 12 }}>
-            <p role="status">{rendered.stale ? '选择或音频源已变化，下方是上一次成片，请重新生成。' : '成片已就绪。'} 时长 {(rendered.version.durationMs / 1000).toFixed(3)} 秒，{rendered.removedDurationMs >= 0 ? '缩短' : '增加'} {Math.abs(rendered.removedDurationMs / 1000).toFixed(3)} 秒，{rendered.version.engine.endsWith('_fade') ? '已启用平滑剪辑' : '直接拼接'}。</p>
-            {rendered.loudness && <p className="card__hint">{LOUDNESS_TARGET_LABEL[rendered.loudness.target] ?? rendered.loudness.target}：{loudnessSummary(rendered.loudness)}</p>}
-            {rendered.hasReplacements && <p className="card__hint">此成片包含重录，生成后会自动转写成片，完成后可直接下载匹配的字幕。</p>}
-            <audio ref={masterAudioRef} aria-label="成片试听" key={rendered.version.id} controls preload="metadata" onPlay={pauseOtherReviewAudio} src={api.audioUrl(sessionId, rendered.version.id)} style={{ width: '100%' }} />
-            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <a className="btn" href={api.downloadUrl(sessionId, rendered.version.id)}>{rendered.stale ? '下载上一次成片 WAV' : '下载成片 WAV'}</a>
-              {!rendered.hasReplacements && <button className="btn" disabled={busy} onClick={handleExportMaster}>{rendered.stale ? '导出上一次成片 SRT' : '导出成片 SRT'}</button>}
-            </div>
-            <div className="render-export" style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                码率
-                <select aria-label="导出码率" value={exportBitrate} disabled={busy} onChange={(event) => setExportBitrate(Number(event.target.value))}>
-                  {EXPORT_BITRATES.map((kbps) => <option key={kbps} value={kbps}>{kbps} kbps{kbps === 192 ? '（推荐）' : ''}</option>)}
-                </select>
-              </label>
-              {(['mp3', 'm4a'] as const).map((format) => (
-                <button key={format} className="btn" disabled={busy} onClick={() => handleExportAudio(format)}>
-                  {exporting === format ? '转码中…' : `下载 ${format.toUpperCase()}`}
-                </button>
-              ))}
-            </div>
-            <p className="card__hint">MP3 兼容性最好；M4A（AAC）同码率下音质更好，适合播客平台和苹果设备。首次导出需转码，之后直接下载。</p>
-            {rendered.hasReplacements && <RenderTranscriptPanel key={rendered.version.id} sessionId={sessionId} versionId={rendered.version.id} audioRef={masterAudioRef} stale={rendered.stale} />}
-          </div>
-        )}
-      </Card>
-
-          <Card id="review-advanced">
-        <details className="advanced-editor">
-          <summary>压缩过长停顿</summary>
-          <p className="card__hint">按音频能量找出过长的停顿，只删中间部分、两侧保留自然间隔。结果作为待确认建议加入剪辑决策，请试听后接受。</p>
-          <div className="advanced-editor__form">
-            <label className="cut-field">停顿超过
-              <select aria-label="停顿阈值" value={minPauseMs} disabled={busy || !ready} onChange={(event) => setMinPauseMs(Number(event.target.value))}>
-                {[1000, 1500, 2000, 3000].map((ms) => <option key={ms} value={ms}>{(ms / 1000).toFixed(1)} 秒</option>)}
-              </select>
-            </label>
-            <button className="btn" type="button" disabled={busy || !ready} onClick={handleSuggestPauses}>查找过长停顿</button>
-          </div>
-          {pauseMessage && <p role="status">{pauseMessage}</p>}
-        </details>
-        <details className="advanced-editor">
-          <summary>高级剪辑：按时间输入删除区间或重录</summary>
-          <form onSubmit={addRange} className="advanced-editor__form">
-            <label className="cut-field">开始（秒）<input aria-label="开始时间（秒）" type="number" min="0" max={totalMs / 1000} step="0.001" required value={startSeconds} onChange={(event) => setStartSeconds(event.target.value)} disabled={busy || !ready} /></label>
-            <label className="cut-field">结束（秒）<input aria-label="结束时间（秒）" type="number" min="0.001" max={totalMs / 1000} step="0.001" required value={endSeconds} onChange={(event) => setEndSeconds(event.target.value)} disabled={busy || !ready} /></label>
-            <button className="btn" type="submit" disabled={busy || !ready}>添加删除区间</button>
-            <button className="btn" type="button" disabled={busy || !ready || asrRunning || !startSeconds || !endSeconds} onClick={() => openRetake(Math.round(Number(startSeconds) * 1000), Math.round(Number(endSeconds) * 1000))}>重录此时间范围</button>
-          </form>
-        </details>
+        {decisions.length === 0 && ready && (
+          <Card id="review-decisions" title="剪辑决策">
+            <p className="card__hint">还没有剪辑。在左侧转写中选中文字删除，或点“查找重复与语气词”“查找过长停顿”生成建议。</p>
           </Card>
+        )}
         {decisions.length > 0 && (
         <Card
           id="review-decisions"
@@ -848,6 +786,10 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
           hint="点击一行展开详情；聚焦某条决策后按 A 接受、R 拒绝，无需逐个点击。"
           action={
             <div className="decision-batch-acts">
+              <div className="segmented" role="group" aria-label="筛选">
+                <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>全部 {decisions.length}</button>
+                <button aria-pressed={filter === 'review'} onClick={() => setFilter('review')}>待确认 {pending.length}</button>
+              </div>
               <button
                 className={pending.length > 0 ? 'btn btn--primary' : 'btn'}
                 onClick={handleConfirmAll}
@@ -955,29 +897,112 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
         </Card>
         )}
 
+          <Card id="review-advanced" title="辅助剪辑" hint="自动找出过长停顿，或按秒数精确输入剪辑范围。">
+        <details className="advanced-editor">
+          <summary>压缩过长停顿</summary>
+          <p className="card__hint">按音频能量找出过长的停顿，只删中间部分、两侧保留自然间隔。结果作为待确认建议加入剪辑决策，请试听后接受。</p>
+          <div className="advanced-editor__form">
+            <label className="cut-field">停顿超过
+              <select aria-label="停顿阈值" value={minPauseMs} disabled={busy || !ready} onChange={(event) => setMinPauseMs(Number(event.target.value))}>
+                {[1000, 1500, 2000, 3000].map((ms) => <option key={ms} value={ms}>{(ms / 1000).toFixed(1)} 秒</option>)}
+              </select>
+            </label>
+            <button className="btn" type="button" disabled={busy || !ready} onClick={handleSuggestPauses}>查找过长停顿</button>
+          </div>
+          {pauseMessage && <p role="status">{pauseMessage}</p>}
+        </details>
+        <details className="advanced-editor">
+          <summary>高级剪辑：按时间输入删除区间或重录</summary>
+          <form onSubmit={addRange} className="advanced-editor__form">
+            <label className="cut-field">开始（秒）<input aria-label="开始时间（秒）" type="number" min="0" max={totalMs / 1000} step="0.001" required value={startSeconds} onChange={(event) => setStartSeconds(event.target.value)} disabled={busy || !ready} /></label>
+            <label className="cut-field">结束（秒）<input aria-label="结束时间（秒）" type="number" min="0.001" max={totalMs / 1000} step="0.001" required value={endSeconds} onChange={(event) => setEndSeconds(event.target.value)} disabled={busy || !ready} /></label>
+            <button className="btn" type="submit" disabled={busy || !ready}>添加删除区间</button>
+            <button className="btn" type="button" disabled={busy || !ready || asrRunning || !startSeconds || !endSeconds} onClick={() => openRetake(Math.round(Number(startSeconds) * 1000), Math.round(Number(endSeconds) * 1000))}>重录此时间范围</button>
+          </form>
+        </details>
+          </Card>
+
         <Card title="本次处理的提醒">
           <WarningList warnings={warnings} />
         </Card>
         </aside>
         {(compactTools || !toolsOpen) && (
           <button ref={toolsTriggerRef} type="button" aria-expanded={toolsOpen} aria-controls="review-tools-panel" className={`review-tools-fab${pending.length > 0 ? ' review-tools-fab--warn' : ''}`} onClick={() => { if (pending.length) { setFilter('review'); jumpToDecision(pending[0].id) } else setToolsOpen(true) }}>
-            {pending.length > 0 ? `待确认 ${pending.length} 条` : '试听与生成'} <span aria-hidden="true">▲</span>
+            {pending.length > 0 ? `待确认 ${pending.length} 条` : '剪辑决策'} <span aria-hidden="true">▲</span>
           </button>
         )}
       </div>
 
-
-      {totalMs > 0 && (
-        <div style={{ margin: 'var(--sp-4) 0' }}>
-          <WaveformRibbon
-            title="时间线 · 判定"
-            hint={waveform ? '波形来自真实录音振幅' : '波形为占位曲线（未取到真实录音数据）'}
-            envelope={waveform ?? FALLBACK_WAVE}
-            durationMs={totalMs}
-            decisions={decisions}
-          />
+      <Card id="review-output" title="生成与导出" hint="确认剪辑后生成成片，试听满意再下载。重叠的删除区间只删一次。">
+        <div className="render-actions">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={smoothCuts} disabled={busy} onChange={(event) => setSmoothCuts(event.target.checked)} />
+            平滑剪辑
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            响度标准化
+            <select aria-label="响度标准化" value={loudnessTarget} disabled={busy} onChange={(event) => setLoudnessTarget(event.target.value as LoudnessTarget | '')}>
+              <option value="">不调整</option>
+              {Object.entries(LOUDNESS_TARGET_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <button className="btn btn--primary" disabled={busy || !ready || pending.length > 0 || !!conflict} onClick={handleRender}>
+            {rendering ? '渲染中…' : '生成剪辑音频'}
+          </button>
         </div>
-      )}
+        {pending.length > 0 && <button className="review-pending-pill" onClick={() => goToSection('review-decisions')}>⚠ 还有 {pending.length} 条待确认，处理后才能生成 →</button>}
+
+        {rendered && (
+          <div style={{ marginTop: 12 }}>
+            <p role="status">{rendered.stale ? '选择或音频源已变化，下方是上一次成片，请重新生成。' : '成片已就绪。'} 时长 {(rendered.version.durationMs / 1000).toFixed(3)} 秒，{rendered.removedDurationMs >= 0 ? '缩短' : '增加'} {Math.abs(rendered.removedDurationMs / 1000).toFixed(3)} 秒，{rendered.version.engine.endsWith('_fade') ? '已启用平滑剪辑' : '直接拼接'}。</p>
+            {rendered.loudness && <p className="card__hint">{LOUDNESS_TARGET_LABEL[rendered.loudness.target] ?? rendered.loudness.target}：{loudnessSummary(rendered.loudness)}</p>}
+            {rendered.hasReplacements && <p className="card__hint">此成片包含重录，生成后会自动转写成片，完成后可直接下载匹配的字幕。</p>}
+            <audio ref={masterAudioRef} aria-label="成片试听" key={rendered.version.id} controls preload="metadata" onPlay={pauseOtherReviewAudio} src={api.audioUrl(sessionId, rendered.version.id)} style={{ width: '100%' }} />
+            <div className="export-groups">
+              <div className="export-group">
+                <h3>音频</h3>
+                <div className="export-group__row">
+                  <a className="btn" href={api.downloadUrl(sessionId, rendered.version.id)}>WAV 无损</a>
+                  {(['mp3', 'm4a'] as const).map((format) => (
+                    <button key={format} className="btn" disabled={busy} onClick={() => handleExportAudio(format)}>
+                      {exporting === format ? '转码中…' : format.toUpperCase()}
+                    </button>
+                  ))}
+                  <label className="inline-field">码率
+                    <select aria-label="导出码率" value={exportBitrate} disabled={busy} onChange={(event) => setExportBitrate(Number(event.target.value))}>
+                      {EXPORT_BITRATES.map((kbps) => <option key={kbps} value={kbps}>{kbps} kbps{kbps === 192 ? '（推荐）' : ''}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <p className="card__hint">MP3 兼容性最好；M4A（AAC）同码率音质更好，适合播客平台和苹果设备。</p>
+              </div>
+              <div className="export-group">
+                <h3>字幕与文本</h3>
+                <div className="export-group__row">
+                  {!rendered.hasReplacements && <button className="btn" disabled={busy} onClick={handleExportMaster}>成片 SRT</button>}
+                  {transcriptExportable && (['txt', 'srt'] as const).map((format) => (
+                    <button key={format} className="btn" disabled={busy || asrRunning} onClick={() => handleExportTranscript(format)}>原始转写 {format.toUpperCase()}</button>
+                  ))}
+                </div>
+                <p className="card__hint">成片 SRT 对应剪辑后的时间；原始转写对应剪辑前录音。</p>
+              </div>
+            </div>
+            {rendered.hasReplacements && <RenderTranscriptPanel key={rendered.version.id} sessionId={sessionId} versionId={rendered.version.id} audioRef={masterAudioRef} stale={rendered.stale} />}
+          </div>
+        )}
+        {!rendered && transcriptExportable && <div className="export-groups">
+          <div className="export-group">
+            <h3>字幕与文本</h3>
+            <div className="export-group__row">
+              {(['txt', 'srt'] as const).map((format) => (
+                <button key={format} className="btn" disabled={busy || asrRunning} onClick={() => handleExportTranscript(format)}>原始转写 {format.toUpperCase()}</button>
+              ))}
+            </div>
+          </div>
+        </div>}
+      </Card>
+
+
     </>
   )
 }

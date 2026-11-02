@@ -10,10 +10,11 @@ export const ROUTES: {
   step: string
   badge?: string
 }[] = [
+  // 按实际使用顺序：先在会话里新建/导入，再录制、（可选）增强，最后剪辑并导出。
+  { key: 'sessions', label: '会话', glyph: '☰', step: '00' },
   { key: 'record', label: '录制', glyph: '●', step: '01' },
-  { key: 'review', label: '复核', glyph: '✂', step: '02' },
-  { key: 'enhance', label: '增强', glyph: '≈', step: '可选' },
-  { key: 'sessions', label: '会话', glyph: '☰', step: '—' },
+  { key: 'enhance', label: '增强', glyph: '≈', step: '02', badge: '可选' },
+  { key: 'review', label: '剪辑导出', glyph: '✂', step: '03' },
 ]
 
 /**

@@ -117,7 +117,18 @@ export default function App() {
         route={route}
         sessionId={sessionId}
         onNavigate={setRoute}
-        strip={<TimebaseStrip versions={versions} roles={roles} />}
+        strip={
+          <div className="topbar">
+            <TimebaseStrip versions={versions} roles={roles} />
+            {import.meta.env.VITE_DEMO === '1' && (
+              <span className="demo-badge" title="界面预览：数据为示例，转写、降噪、导出为模拟结果；录音与重录需要连接真实后端。">演示模式</span>
+            )}
+            <div className="vp-toggle" role="group" aria-label="预览端形态">
+              <button aria-pressed={vp === 'desktop'} onClick={() => setVp('desktop')}>电脑端</button>
+              <button aria-pressed={vp === 'mobile'} onClick={() => setVp('mobile')}>手机端</button>
+            </div>
+          </div>
+        }
       >
         {route === 'record' &&
           (sessionId ? (
@@ -153,19 +164,12 @@ export default function App() {
       </AppShell>
 
       {loadError && (
-        <div className="previewbar" style={{ left: 12, right: 'auto' }}>
-          <span style={{ color: 'tomato' }}>{loadError}</span>
+        <div className="toast toast--error" role="alert">
+          <span>{loadError}</span>
+          <button className="btn btn--link" onClick={() => setLoadError(null)}>关闭</button>
         </div>
       )}
 
-      <div className="previewbar" role="group" aria-label="预览端形态">
-        <button aria-pressed={vp === 'desktop'} onClick={() => setVp('desktop')}>
-          电脑端
-        </button>
-        <button aria-pressed={vp === 'mobile'} onClick={() => setVp('mobile')}>
-          手机端
-        </button>
-      </div>
     </div>
   )
 }

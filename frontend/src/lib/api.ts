@@ -86,6 +86,12 @@ class ApiError extends Error {
   }
 }
 
+/** 演示模式（VITE_DEMO=1）下音频来自浏览器内合成的 Blob；正常构建这里恒为 null。 */
+function demoAudioUrl(sessionId: string, versionId: string): string | null {
+  const hook = (globalThis as Record<string, unknown>).__CLEANCUT_DEMO_AUDIO__ as ((s: string, v: string) => string) | undefined
+  return hook ? hook(sessionId, versionId) || null : null
+}
+
 export type ExportFormat = 'mp3' | 'm4a'
 export const EXPORT_BITRATES = [96, 128, 192, 256, 320] as const
 
@@ -170,7 +176,7 @@ export const api = {
     return requestOrNull<{ envelope: number[] }>(`/api/sessions/${id}/waveform?buckets=${buckets}`)
   },
   audioUrl(sessionId: string, versionId: string) {
-    return `${API_BASE}/api/sessions/${sessionId}/versions/${versionId}/audio`
+    return demoAudioUrl(sessionId, versionId) ?? `${API_BASE}/api/sessions/${sessionId}/versions/${versionId}/audio`
   },
   getWarnings(id: string) {
     return request<Warning[]>(`/api/sessions/${id}/warnings`)
@@ -213,7 +219,7 @@ export const api = {
     return requestOrNull<RenderOutput>(`/api/sessions/${id}/render`)
   },
   downloadUrl(id: string, versionId: string) {
-    return `${API_BASE}/api/sessions/${id}/versions/${versionId}/audio?download=true`
+    return demoAudioUrl(id, versionId) ?? `${API_BASE}/api/sessions/${id}/versions/${versionId}/audio?download=true`
   },
   suggestDecisions(id: string, transcriptionJobId: string) {
     return request<{ addedCount: number; decisions: EditDecision[] }>(`/api/sessions/${id}/decisions/suggest`, {
