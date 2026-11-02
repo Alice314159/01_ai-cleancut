@@ -1,4 +1,5 @@
 from app.models.render_transcription import RenderTranscriptionJob
+from app.models.chapter import Chapter
 from app.models.transcription import TranscriptionJob
 from app.models.render import RenderOutput
 from app.models.audio import AudioVersion, RoleAssignment
@@ -10,6 +11,7 @@ from app.models.transcript import TranscriptToken
 from app.models.warning import Warning
 
 __all__ = [
+    "Chapter",
     "RenderTranscriptionJob",
     "TranscriptionJob",
     "RenderOutput",
