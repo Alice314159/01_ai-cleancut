@@ -8,12 +8,20 @@ export function tc(ms: number): string {
   return `${sign}${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(f).padStart(3, '0')}`
 }
 
-/** 时长用人读格式，不带毫秒——用于"已录 12 分 04 秒"这类叙述位置。 */
+/**
+ * 时长用人读格式——用于"已录 12 分 04 秒""预计缩短 0.3 秒"这类叙述位置。
+ * 不足一分钟按秒显示到 0.1 秒（整数时不带 .0），否则显示"X 分 XX 秒"。
+ */
 export function dur(ms: number): string {
+  const tenths = Math.round(Math.max(0, ms) / 100)
+  if (tenths < 600) {
+    const seconds = tenths / 10
+    return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} 秒`
+  }
   const total = Math.round(ms / 1000)
   const m = Math.floor(total / 60)
   const s = total % 60
-  return m > 0 ? `${m} 分 ${String(s).padStart(2, '0')} 秒` : `${s} 秒`
+  return `${m} 分 ${String(s).padStart(2, '0')} 秒`
 }
 
 /**

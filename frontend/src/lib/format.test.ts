@@ -31,6 +31,17 @@ describe('dur', () => {
   it('pads seconds once minutes are shown', () => {
     expect(dur(65000)).toBe('1 分 05 秒')
   })
+
+  it('shows tenths of a second under a minute', () => {
+    expect(dur(340)).toBe('0.3 秒')
+    expect(dur(6240)).toBe('6.2 秒')
+    expect(dur(25000)).toBe('25 秒')
+  })
+
+  it('rolls over to minutes instead of showing 60 秒', () => {
+    expect(dur(59960)).toBe('1 分 00 秒')
+    expect(dur(59940)).toBe('59.9 秒')
+  })
 })
 
 describe('pct', () => {
