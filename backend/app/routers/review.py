@@ -11,9 +11,9 @@ from app.schemas import EditDecisionOut, TranscriptTokenOut, UpdateDecisionIn
 
 from app.schemas.audio import AudioVersionOut
 from app.schemas.decision import BatchDecisionsIn
-from app.schemas.render import CreateManualDecisionIn, RenderOutputOut, RenderOptionsIn
+from app.schemas.render import CreateManualDecisionIn, RenderOutputOut, RenderOptionsIn, SuggestPausesIn
 from app.schemas.common import CamelModel
-from app.services import rendering, suggestions, transcript_export, retakes, render_transcription
+from app.services import pause_suggestions, rendering, suggestions, transcript_export, retakes, render_transcription
 from app.schemas.transcription import CreateTranscriptionIn, TranscriptionJobOut
 
 router = APIRouter(prefix="/api/sessions/{session_id}", tags=["review"])
@@ -108,7 +108,8 @@ def render_audio(session_id: str, background_tasks: BackgroundTasks, body: Rende
     if db.get(RecordingSession, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
     try:
-        output = rendering.render_session(db, session_id, smooth_cuts=body.smooth_cuts if body else False)
+        output = rendering.render_session(db, session_id, smooth_cuts=body.smooth_cuts if body else False,
+                                          loudness_target=body.loudness_target if body else None)
     except rendering.RenderConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except rendering.RenderInputError as exc:
@@ -140,6 +141,7 @@ def _render_out(db: Session, output: RenderOutput) -> RenderOutputOut:
         transcription_job=render_transcription.latest(db, output.session_id, output.version_id),
         transcript_ready=bool((completed := render_transcription.latest(db, output.session_id, output.version_id, completed=True)) and completed.tokens),
         has_replacements=any(d["action"] == "REPLACE_AUDIO" and d["accepted"] for d in output.decisions),
+        loudness=output.loudness,
     )
 
 
@@ -157,6 +159,20 @@ def suggest_decisions(session_id: str, body: SuggestDecisionsIn, db: Session = D
     return {"addedCount": added, "decisions": [EditDecisionOut.model_validate(d).model_dump(by_alias=True) for d in list_decisions(session_id, db)]}
 
 
+@router.post("/decisions/suggest-pauses")
+def suggest_pauses(session_id: str, body: SuggestPausesIn | None = None, db: Session = Depends(get_db)):
+    """按剪辑源音频的真实能量查找过长停顿，生成待确认的"压缩停顿"建议。"""
+    if db.get(RecordingSession, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    body = body or SuggestPausesIn()
+    try:
+        added = pause_suggestions.generate(db, session_id, min_pause_ms=body.min_pause_ms, keep_ms=body.keep_ms)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"addedCount": added, "decisions": [EditDecisionOut.model_validate(d).model_dump(by_alias=True) for d in list_decisions(session_id, db)]}
+
+
 @router.post("/decisions/reject-suggestions", response_model=list[EditDecisionOut])
 def reject_pending_suggestions(session_id: str, body: BatchDecisionsIn | None = None, db: Session = Depends(get_db)):
     if db.get(RecordingSession, session_id) is None:
@@ -165,8 +181,8 @@ def reject_pending_suggestions(session_id: str, body: BatchDecisionsIn | None = 
     db.execute(text("BEGIN IMMEDIATE"))
     check_batch_snapshot(db, session_id, body)
     db.query(EditDecision).filter_by(
-        session_id=session_id, source="transcript_rule", accepted=None, hard_protected=False,
-    ).filter(EditDecision.action != "KEEP_PROTECTED").update(
+        session_id=session_id, accepted=None, hard_protected=False,
+    ).filter(EditDecision.source.in_(pause_suggestions.SUGGESTION_SOURCES)).filter(EditDecision.action != "KEEP_PROTECTED").update(
         {EditDecision.accepted: False, EditDecision.revision: EditDecision.revision + 1}, synchronize_session=False,
     )
     db.commit()

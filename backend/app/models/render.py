@@ -19,3 +19,6 @@ class RenderOutput(Base):
     removed_duration_ms: Mapped[int] = mapped_column(Integer)
 
     transcript_snapshot: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # 响度标准化结果；未启用时为 null。形状见 services/loudness.LoudnessResult。
+    loudness: Mapped[dict | None] = mapped_column(JSON, nullable=True)

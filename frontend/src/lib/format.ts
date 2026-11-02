@@ -60,8 +60,30 @@ export const ACTION_LABEL: Record<string, string> = {
   DELETE_REPETITION: '删除重读',
   DELETE_STUTTER: '删除口吃',
   DELETE_FILLER: '删除语气词',
-  COMPRESS_SILENCE: '压缩静音',
+  COMPRESS_SILENCE: '压缩停顿',
   KEEP_PROTECTED: '保护保留',
+}
+
+/** 生成成片时会被剪掉的决策类型：各类删除 + 压缩停顿（区间本身就是停顿中要删掉的部分）。 */
+export function isCutAction(action: string): boolean {
+  return action.startsWith('DELETE_') || action === 'COMPRESS_SILENCE'
+}
+
+export const LOUDNESS_TARGET_LABEL: Record<string, string> = {
+  podcast: '播客 / 流媒体（-16 LUFS）',
+  broadcast: '广播 EBU R128（-23 LUFS）',
+}
+
+/** 成片响度结果的一句话说明。 */
+export function loudnessSummary(result: {
+  targetLufs: number; inputLufs: number | null; outputLufs: number | null; gainDb: number; limitedBy: string | null
+}): string {
+  if (result.inputLufs == null || result.outputLufs == null) return '成片近乎静音，未调整响度。'
+  const gain = `${result.gainDb > 0 ? '+' : ''}${result.gainDb.toFixed(1)} dB`
+  const base = `响度 ${result.inputLufs.toFixed(1)} → ${result.outputLufs.toFixed(1)} LUFS（${gain}）`
+  if (result.limitedBy === 'peak') return `${base}，为避免削波未完全达到 ${result.targetLufs} LUFS。`
+  if (result.limitedBy === 'max_gain') return `${base}，原录音过轻，提升已达上限，未完全达到 ${result.targetLufs} LUFS。`
+  return `${base}，已达到目标。`
 }
 
 export const GRADE_LABEL: Record<string, string> = {

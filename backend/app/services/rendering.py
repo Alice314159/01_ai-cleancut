@@ -14,9 +14,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models import AudioVersion, EditDecision, EnhancementJob, RecordingSession, RenderOutput, RoleAssignment
-from app.services import storage, transcript_export
+import dataclasses
+import os
 
-DELETE_ACTIONS = {"DELETE_REPETITION", "DELETE_STUTTER", "DELETE_FILLER", "DELETE_SELECTION"}
+from app.services import loudness, storage, transcript_export
+
+# COMPRESS_SILENCE 的区间本身就是"停顿中间要删掉的部分"（两侧余量已在生成时留好）。
+DELETE_ACTIONS = {"DELETE_REPETITION", "DELETE_STUTTER", "DELETE_FILLER", "DELETE_SELECTION", "COMPRESS_SILENCE"}
 ACTIVE_JOBS = ["QUEUED", "PROCESSING", "QUALITY_CHECKING"]
 
 
@@ -81,7 +85,7 @@ def accepted_cuts(decisions: list[dict], duration_ms: int) -> list[tuple[int, in
         if decision["action"] == "REPLACE_AUDIO":
             continue
         if decision["action"] not in DELETE_ACTIONS:
-            raise RenderInputError("当前只支持删除区间；请拒绝尚不支持的静音压缩等决策")
+            raise RenderInputError("存在尚不支持的决策类型，请拒绝后再渲染")
         start, end = decision["start_ms"], decision["end_ms"]
         if not 0 <= start < end <= duration_ms:
             raise RenderInputError("删除区间超出原始时间轴，请修正或拒绝该决策")
@@ -168,7 +172,8 @@ def write_render(source: Path, destination: Path, cuts: list[tuple[int, int]], s
             raise RenderInputError("源音频格式不可用") from exc
 
 
-def render_session(db: Session, session_id: str, smooth_cuts: bool = False) -> RenderOutput:
+def render_session(db: Session, session_id: str, smooth_cuts: bool = False,
+                   loudness_target: str | None = None) -> RenderOutput:
     session = validate_session(db, session_id)
     source = render_source(db, session_id)
     decisions = decision_snapshot(db, session_id)
@@ -189,6 +194,17 @@ def render_session(db: Session, session_id: str, smooth_cuts: bool = False) -> R
             rendered = write_replacement_render(source_path, output_path, cuts, replacements, smooth_cuts)
         else:
             rendered = write_render(source_path, output_path, cuts, smooth_cuts=True) if smooth_cuts else write_render(source_path, output_path, cuts)
+        loudness_info = None
+        if loudness_target:
+            # 线性增益不改变样本数，rendered 的时长统计依然有效。
+            normalized = output_path.with_name(output_path.stem + ".loudnorm.wav")
+            try:
+                loudness_info = dataclasses.asdict(loudness.normalize(output_path, normalized, loudness_target))
+                os.replace(normalized, output_path)
+            except loudness.LoudnessError as exc:
+                raise RenderInputError(f"响度标准化失败：{exc}") from exc
+            finally:
+                normalized.unlink(missing_ok=True)
         db.execute(text("BEGIN IMMEDIATE"))
         validate_session(db, session_id)
         current_source = render_source(db, session_id)
@@ -209,6 +225,7 @@ def render_session(db: Session, session_id: str, smooth_cuts: bool = False) -> R
             transcript_snapshot=transcript_export.snapshot(db, session_id),
             cut_ranges=[{"start_ms": start, "end_ms": end} for start, end in cuts],
             removed_duration_ms=rendered.removed_duration_ms,
+            loudness=loudness_info,
         )
         db.add(output)
         role = db.query(RoleAssignment).filter_by(session_id=session_id, role="EXPORT_SOURCE").first()

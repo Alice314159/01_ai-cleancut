@@ -5,6 +5,7 @@ import type {
   DenoiseMode,
   EditDecision,
   EnhancementJob,
+  LoudnessTarget,
   RoleAssignment,
   RenderOutput,
   TranscriptToken,
@@ -186,8 +187,13 @@ export const api = {
     body.append('snapshot', JSON.stringify({ expectedRevisions: Object.fromEntries(decisions.map((d) => [d.id, d.revision])) }))
     return request<EditDecision>(`/api/sessions/${id}/retakes`, { method: 'POST', body })
   },
-  render(id: string, smoothCuts = false) {
-    return request<RenderOutput>(`/api/sessions/${id}/render`, { method: 'POST', body: JSON.stringify({ smoothCuts }) })
+  render(id: string, smoothCuts = false, loudnessTarget: LoudnessTarget | null = null) {
+    return request<RenderOutput>(`/api/sessions/${id}/render`, { method: 'POST', body: JSON.stringify({ smoothCuts, loudnessTarget }) })
+  },
+  suggestPauses(id: string, minPauseMs: number, keepMs: number) {
+    return request<{ addedCount: number; decisions: EditDecision[] }>(`/api/sessions/${id}/decisions/suggest-pauses`, {
+      method: 'POST', body: JSON.stringify({ minPauseMs, keepMs }),
+    })
   },
   getRender(id: string) {
     return requestOrNull<RenderOutput>(`/api/sessions/${id}/render`)

@@ -72,9 +72,11 @@ def init_db() -> None:
             connection.execute(text("ALTER TABLE transcript_tokens ADD COLUMN job_id VARCHAR"))
 
     columns = {column["name"] for column in inspect(engine).get_columns("render_outputs")}
-    if "transcript_snapshot" not in columns:
-        with engine.begin() as connection:
+    with engine.begin() as connection:
+        if "transcript_snapshot" not in columns:
             connection.execute(text("ALTER TABLE render_outputs ADD COLUMN transcript_snapshot JSON"))
+        if "loudness" not in columns:
+            connection.execute(text("ALTER TABLE render_outputs ADD COLUMN loudness JSON"))
 
     columns = {column["name"] for column in inspect(engine).get_columns("edit_decisions")}
     if "revision" not in columns:

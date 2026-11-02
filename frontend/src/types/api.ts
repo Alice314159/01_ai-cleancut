@@ -213,7 +213,7 @@ export interface EditDecision {
   reason: string
   text: string
   confidence: number
-  source: 'algorithm' | 'user' | 'transcript_rule'
+  source: 'algorithm' | 'user' | 'transcript_rule' | 'silence_rule'
   hardProtected: boolean
   reviewRequired: boolean
   accepted: boolean | null
@@ -238,6 +238,21 @@ export interface RenderOutput {
   removedDurationMs: number
   cutRanges: { startMs: number; endMs: number }[]
   stale: boolean
+  loudness?: LoudnessResult | null
+}
+
+export type LoudnessTarget = 'podcast' | 'broadcast'
+
+/** 成片响度标准化结果；inputLufs 为 null 表示近乎静音，未做调整。 */
+export interface LoudnessResult {
+  target: LoudnessTarget
+  targetLufs: number
+  inputLufs: number | null
+  inputTruePeakDb: number | null
+  gainDb: number
+  outputLufs: number | null
+  /** null=已达到目标；peak=受真峰值上限约束；max_gain=提升幅度已到上限 */
+  limitedBy: 'peak' | 'max_gain' | null
 }
 
 export interface TranscriptionJob {

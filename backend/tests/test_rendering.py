@@ -123,7 +123,7 @@ def test_rerender_uses_uncut_source_and_keeps_old_output(client, recording, isol
 
 @pytest.mark.parametrize('kwargs,status', [
     ({'accepted': None}, 409),
-    ({'action': 'COMPRESS_SILENCE'}, 422),
+    ({'action': 'UNKNOWN_ACTION'}, 422),
 ])
 def test_unresolved_or_unsupported_edits_do_not_publish(client, recording, isolated_backend, kwargs, status):
     session_id, source_id, _, _ = recording

@@ -5,9 +5,9 @@ import { Card, Chip, Stat } from '../components/Bits'
 import { WarningList } from '../components/WarningList'
 import { WaveformRibbon } from '../components/WaveformRibbon'
 import { envelope as mockEnvelope } from '../mock/data'
-import { ACTION_LABEL, dur, tc } from '../lib/format'
+import { ACTION_LABEL, dur, isCutAction, LOUDNESS_TARGET_LABEL, loudnessSummary, tc } from '../lib/format'
 import { api, DecisionConflictError, type SessionDetail } from '../lib/api'
-import type { AudioVersion, EditDecision, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
+import type { AudioVersion, EditDecision, LoudnessTarget, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
 
 const FALLBACK_WAVE = mockEnvelope(190, 19)
 const PAUSE_THRESHOLD_MS = 400
@@ -47,6 +47,9 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const loadRevisionRef = useRef(0)
   const [conflict, setConflict] = useState<{ current: EditDecision; intended: boolean | null } | null>(null)
   const [smoothCuts, setSmoothCuts] = useState(false)
+  const [loudnessTarget, setLoudnessTarget] = useState<LoudnessTarget | ''>('')
+  const [minPauseMs, setMinPauseMs] = useState(1500)
+  const [pauseMessage, setPauseMessage] = useState('')
   const [rendering, setRendering] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -285,7 +288,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const handleRender = () => perform(async () => {
     setRendering(true)
     try {
-      setRendered(await api.render(sessionId, smoothCuts))
+      setRendered(await api.render(sessionId, smoothCuts, loudnessTarget || null))
       onDataChange()
     } finally { setRendering(false) }
   })
@@ -313,6 +316,17 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     link.href = url; link.download = `transcript-original.${format}`
     document.body.appendChild(link); link.click(); link.remove()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  })
+
+  const handleSuggestPauses = () => perform(async () => {
+    // 保留时长取停顿阈值的三分之一，夹在 0.3–0.8 秒之间：句间仍有自然的呼吸感。
+    const keepMs = Math.min(800, Math.max(300, Math.round(minPauseMs / 3)))
+    const result = await api.suggestPauses(sessionId, minPauseMs, keepMs)
+    setDecisions(result.decisions)
+    setPauseMessage(result.addedCount
+      ? `找到 ${result.addedCount} 处过长停顿，已加入待确认，每处保留约 ${(keepMs / 1000).toFixed(1)} 秒。`
+      : '没有找到新的过长停顿；已有决策覆盖的区间会跳过，底噪过大时也无法可靠判断。')
+    if (result.addedCount) setRendered((previous) => previous ? { ...previous, stale: true } : null)
   })
 
   const handleSuggest = () => perform(async () => {
@@ -405,7 +419,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const shown = filter === 'review' ? pending : decisions
 
   const coveredBy = (startMs: number, endMs: number, accepted: boolean | null) =>
-    decisions.some((d) => d.accepted === accepted && !d.hardProtected && d.action.startsWith('DELETE_') && d.startMs <= startMs && d.endMs >= endMs)
+    decisions.some((d) => d.accepted === accepted && !d.hardProtected && isCutAction(d.action) && d.startMs <= startMs && d.endMs >= endMs)
 
   // 疑似重复的待定建议单独标记，方便在正文中和其它待定删除（如手动选段）区分开。
   const coveredByRepetition = (startMs: number, endMs: number) =>
@@ -522,7 +536,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
 
   const totalMs = session?.totalDurationMs ?? 0
   const savedMs = useMemo(() => {
-    const intervals = decisions.filter((d) => d.accepted && !d.hardProtected && d.action.startsWith('DELETE_'))
+    const intervals = decisions.filter((d) => d.accepted && !d.hardProtected && isCutAction(d.action))
       .map((d) => [Math.max(0, d.startMs), Math.min(totalMs, d.endMs)])
       .filter(([start, end]) => end > start).sort((a, b) => a[0] - b[0])
     let end = 0
@@ -746,6 +760,13 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
             <input type="checkbox" checked={smoothCuts} disabled={busy} onChange={(event) => setSmoothCuts(event.target.checked)} />
             平滑剪辑
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            响度标准化
+            <select aria-label="响度标准化" value={loudnessTarget} disabled={busy} onChange={(event) => setLoudnessTarget(event.target.value as LoudnessTarget | '')}>
+              <option value="">不调整</option>
+              {Object.entries(LOUDNESS_TARGET_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
           <button className="btn btn--primary" disabled={busy || !ready || pending.length > 0 || !!conflict} onClick={handleRender}>
             {rendering ? '渲染中…' : '生成剪辑音频'}
           </button>
@@ -755,6 +776,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
         {rendered && (
           <div style={{ marginTop: 12 }}>
             <p role="status">{rendered.stale ? '选择或音频源已变化，下方是上一次成片，请重新生成。' : '成片已就绪。'} 时长 {(rendered.version.durationMs / 1000).toFixed(3)} 秒，{rendered.removedDurationMs >= 0 ? '缩短' : '增加'} {Math.abs(rendered.removedDurationMs / 1000).toFixed(3)} 秒，{rendered.version.engine.endsWith('_fade') ? '已启用平滑剪辑' : '直接拼接'}。</p>
+            {rendered.loudness && <p className="card__hint">{LOUDNESS_TARGET_LABEL[rendered.loudness.target] ?? rendered.loudness.target}：{loudnessSummary(rendered.loudness)}</p>}
             {rendered.hasReplacements && <p className="card__hint">此成片包含重录，生成后会自动转写成片，完成后可直接下载匹配的字幕。</p>}
             <audio ref={masterAudioRef} aria-label="成片试听" key={rendered.version.id} controls preload="metadata" onPlay={pauseOtherReviewAudio} src={api.audioUrl(sessionId, rendered.version.id)} style={{ width: '100%' }} />
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -767,6 +789,19 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
       </Card>
 
           <Card id="review-advanced">
+        <details className="advanced-editor">
+          <summary>压缩过长停顿</summary>
+          <p className="card__hint">按音频能量找出过长的停顿，只删中间部分、两侧保留自然间隔。结果作为待确认建议加入剪辑决策，请试听后接受。</p>
+          <div className="advanced-editor__form">
+            <label className="cut-field">停顿超过
+              <select aria-label="停顿阈值" value={minPauseMs} disabled={busy || !ready} onChange={(event) => setMinPauseMs(Number(event.target.value))}>
+                {[1000, 1500, 2000, 3000].map((ms) => <option key={ms} value={ms}>{(ms / 1000).toFixed(1)} 秒</option>)}
+              </select>
+            </label>
+            <button className="btn" type="button" disabled={busy || !ready} onClick={handleSuggestPauses}>查找过长停顿</button>
+          </div>
+          {pauseMessage && <p role="status">{pauseMessage}</p>}
+        </details>
         <details className="advanced-editor">
           <summary>高级剪辑：按时间输入删除区间或重录</summary>
           <form onSubmit={addRange} className="advanced-editor__form">
@@ -792,7 +827,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                 确认全部待定项{pending.length > 0 ? ` (${pending.length})` : ''}
               </button>
               <button className="btn" onClick={handleRejectSuggestions}
-                disabled={busy || !pending.some((d) => d.source === 'transcript_rule')}>
+                disabled={busy || !pending.some((d) => d.source === 'transcript_rule' || d.source === 'silence_rule')}>
                 拒绝待定建议
               </button>
             </div>
@@ -862,7 +897,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                       {d.hardProtected && <Chip tone="protect">需先解除保护</Chip>}
                       <span className="mono" style={{ fontSize: 'var(--step--1)', color: 'var(--text-faint)' }}>
-                        {d.source === 'transcript_rule' ? '文字规则建议' : d.confidence.toFixed(2)}
+                        {d.source === 'transcript_rule' ? '文字规则建议' : d.source === 'silence_rule' ? '停顿检测建议' : d.confidence.toFixed(2)}
                       </span>
                     </div>
                     <p className="decision__why">{d.reason}</p>

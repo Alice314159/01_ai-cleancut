@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createdLabel, db, dur, pct, tc, toDbfs } from './format'
+import { createdLabel, db, dur, isCutAction, loudnessSummary, pct, tc, toDbfs } from './format'
 
 describe('tc', () => {
   it('formats zero as mm:ss.mmm', () => {
@@ -94,5 +94,34 @@ describe('createdLabel', () => {
 
   it('includes the year for older sessions', () => {
     expect(createdLabel(new Date(2025, 11, 1, 8, 0).toISOString(), now)).toBe('2025年12月1日 08:00')
+  })
+})
+
+describe('isCutAction', () => {
+  it('treats deletions and pause compression as cuts', () => {
+    expect(isCutAction('DELETE_SELECTION')).toBe(true)
+    expect(isCutAction('COMPRESS_SILENCE')).toBe(true)
+    expect(isCutAction('REPLACE_AUDIO')).toBe(false)
+    expect(isCutAction('KEEP_PROTECTED')).toBe(false)
+  })
+})
+
+describe('loudnessSummary', () => {
+  const base = { targetLufs: -16, inputLufs: -26, outputLufs: -16, gainDb: 10, limitedBy: null }
+
+  it('reports the achieved loudness and gain', () => {
+    expect(loudnessSummary(base)).toBe('响度 -26.0 → -16.0 LUFS（+10.0 dB），已达到目标。')
+  })
+
+  it('explains when the peak ceiling prevented reaching the target', () => {
+    expect(loudnessSummary({ ...base, outputLufs: -17.5, gainDb: 8.5, limitedBy: 'peak' })).toContain('为避免削波')
+  })
+
+  it('explains when the recording was too quiet', () => {
+    expect(loudnessSummary({ ...base, inputLufs: -50, outputLufs: -30, gainDb: 20, limitedBy: 'max_gain' })).toContain('提升已达上限')
+  })
+
+  it('handles near-silent output', () => {
+    expect(loudnessSummary({ ...base, inputLufs: null, outputLufs: null, gainDb: 0 })).toBe('成片近乎静音，未调整响度。')
   })
 })
