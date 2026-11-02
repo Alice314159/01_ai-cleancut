@@ -1,0 +1,60 @@
+from collections.abc import Generator
+
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
+from app.config import DATABASE_URL
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False},  # SQLite + 多线程/WS 访问需要这个
+)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+def get_db() -> Generator[Session, None, None]:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def init_db() -> None:
+    # 导入全部模型模块，确保它们在 metadata 上注册，再建表。
+    from app import models  # noqa: F401
+
+    Base.metadata.create_all(bind=engine)
+    # Existing SQLite installations predate job timestamps. Preserve their insertion order.
+    columns = {column["name"] for column in inspect(engine).get_columns("enhancement_jobs")}
+    if "created_at_ns" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE enhancement_jobs ADD COLUMN created_at_ns BIGINT NOT NULL DEFAULT 0"))
+            connection.execute(text("UPDATE enhancement_jobs SET created_at_ns = rowid"))
+
+    columns = {column["name"] for column in inspect(engine).get_columns("transcript_tokens")}
+    with engine.begin() as connection:
+        if "end_ms" not in columns:
+            connection.execute(text("ALTER TABLE transcript_tokens ADD COLUMN end_ms INTEGER"))
+        if "job_id" not in columns:
+            connection.execute(text("ALTER TABLE transcript_tokens ADD COLUMN job_id VARCHAR"))
+
+    columns = {column["name"] for column in inspect(engine).get_columns("render_outputs")}
+    if "transcript_snapshot" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE render_outputs ADD COLUMN transcript_snapshot JSON"))
+
+    columns = {column["name"] for column in inspect(engine).get_columns("edit_decisions")}
+    if "revision" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE edit_decisions ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"))
+
+    with engine.begin() as connection:
+        if "replacement_version_id" not in columns:
+            connection.execute(text("ALTER TABLE edit_decisions ADD COLUMN replacement_version_id VARCHAR"))
+        if "replacement_duration_ms" not in columns:
+            connection.execute(text("ALTER TABLE edit_decisions ADD COLUMN replacement_duration_ms INTEGER"))

@@ -1,0 +1,43 @@
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import CORS_ORIGINS
+from app.db import init_db
+from app.routers import enhancement, recording_ws, review, sessions, transcription
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    from app.services.transcription import recover_interrupted_jobs
+    recover_interrupted_jobs()
+    from app.services import render_transcription
+    render_transcription.recover_interrupted_jobs()
+    from app.services.stub_pipeline import recover_interrupted_enhancements, recover_interrupted_finalizations
+    recover_interrupted_enhancements()
+    recover_interrupted_finalizations()
+    yield
+
+
+app = FastAPI(title="AI CleanCut API", version="2.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(sessions.router)
+app.include_router(enhancement.router)
+app.include_router(review.router)
+app.include_router(transcription.router)
+app.include_router(recording_ws.router)
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}

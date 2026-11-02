@@ -1,0 +1,82 @@
+/*
+ * AI CleanCut 设计令牌
+ *
+ * 配色的分工不是装饰性的：这个产品从头到尾在区分两种状态——
+ *   已确认 / 判定 (committed)   →  --sig-committed  青
+ *   待定  / 提示 (provisional)  →  --sig-provisional 琥珀
+ * 界面上任何一处这两种颜色出现，含义都相同。不用它们做强调、按钮或品牌色。
+ * 其余功能色同理：保护区间、删除区间、危险各占一个语义位，不复用。
+ */
+
+:root {
+  /* 底：偏蓝的墨色，不是纯黑。录音常在暗光环境，纯黑边缘会发糊 */
+  --ink: #121216;
+  --surface: #1c1c26;
+  --surface-2: #232330;
+  --surface-3: #2c2c3c;
+  --hairline: #383847;
+  --hairline-soft: #2b2b38;
+
+  --sidebar: #17171f;
+  --primary: #b2a1ff;
+  --primary-hover: #c2b4ff;
+  --primary-ink: #211939;
+  --primary-dim: #2e2841;
+  --accent: #b8c4d8;
+
+  --text: #e0e0e6;
+  --text-dim: #aaaab9;
+  --text-faint: #8b8b9e;
+
+  /* 语义色——每一个都只表达一件事 */
+  --sig-committed: #4fd1bd; /* 已确认转写 / 已判定决策 */
+  --sig-provisional: #e0a341; /* 待定转写 / 实时提示 */
+  --sig-protect: #7d90e8; /* 保护区间 / 不可自动删除 */
+  --sig-cut: #d2596b; /* 删除区间 */
+  --sig-danger: #e8674f; /* 严重警告：削波、设备断开 */
+
+  --sig-committed-dim: color-mix(in srgb, var(--sig-committed) 22%, transparent);
+  --sig-provisional-dim: color-mix(in srgb, var(--sig-provisional) 22%, transparent);
+  --sig-protect-dim: color-mix(in srgb, var(--sig-protect) 22%, transparent);
+  --sig-cut-dim: color-mix(in srgb, var(--sig-cut) 22%, transparent);
+
+  /*
+   * 字体：等宽只用于必须对齐的数据——时间码、样本数、评分、dB 值、版本号。
+   * 时间码跳字是这类工具最常见的低级瑕疵，等宽是功能性选择而非风格选择。
+   */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+  --font-data: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Cascadia Code',
+    'Roboto Mono', Menlo, Consolas, monospace;
+
+  --step--1: 12px;
+  --step-0: 14px;
+  --step-1: 15px;
+  --step-2: 19px;
+  --step-3: 26px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+
+  --radius: 8px;
+  --radius-lg: 14px;
+
+  --rail-w: 216px;
+  --tabbar-h: 58px;
+  --previewbar-h: 56px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
