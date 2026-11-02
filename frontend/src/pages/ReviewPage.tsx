@@ -2,6 +2,7 @@ import { RenderTranscriptPanel } from '../components/RenderTranscriptPanel'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { RetakeDialog, type RetakeTarget } from '../components/RetakeDialog'
 import { ChapterPanel } from '../components/ChapterPanel'
+import { CoverPicker } from '../components/CoverPicker'
 import { Card, Chip } from '../components/Bits'
 import { isBoolean, oneOf, usePref } from '../lib/prefs'
 import { WarningList } from '../components/WarningList'
@@ -59,6 +60,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [chapterText, setChapterText] = useState<string | null>(null)
   const [chapterCopied, setChapterCopied] = useState(false)
+  const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const [rendering, setRendering] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -330,6 +332,16 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     } finally { setExporting(null) }
   })
 
+  const handleRename = () => perform(async () => {
+    const title = titleDraft?.trim()
+    if (!title || !session) return
+    if (title !== session.title) {
+      setSession(await api.updateSession(sessionId, { title }))
+      onDataChange()
+    }
+    setTitleDraft(null)
+  })
+
   const handleChapterFromSelection = () => perform(async () => {
     if (!wordSelection) return
     const title = wordSelectionText.replace(/[，。！？、,.!?\s]+$/, '').slice(0, 30) || `第 ${chapters.length + 1} 章`
@@ -396,6 +408,34 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   }
 
   useEffect(() => { wordSelectionRef.current = wordSelection }, [wordSelection])
+
+  // 键盘快捷键：空格 播放/暂停，Delete/Backspace 删除选中文字，Esc 取消选择。
+  // 输入框、下拉框、打开的对话框里不拦截；处理函数每次渲染更新到 ref，监听只挂一次。
+  const shortcutRef = useRef<(event: KeyboardEvent) => void>(() => undefined)
+  shortcutRef.current = (event) => {
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+    const target = event.target as HTMLElement | null
+    if (target?.closest('input, textarea, select, [contenteditable="true"], dialog[open]') || document.querySelector('dialog[open]')) return
+    const onTranscript = !!target?.closest('.transcript-word, .transcript-pause')
+    if (event.key === ' ' && (onTranscript || !target?.closest('button, a, summary, audio'))) {
+      const audio = audioRef.current
+      if (!audio) return
+      event.preventDefault()
+      previewEndRef.current = null
+      if (audio.paused) void audio.play().catch(() => undefined); else audio.pause()
+    } else if ((event.key === 'Delete' || event.key === 'Backspace') && wordSelection && !busy) {
+      event.preventDefault()
+      void handleDeleteSelectedText()
+    } else if (event.key === 'Escape' && wordSelection) {
+      event.preventDefault()
+      clearWordSelection()
+    }
+  }
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => shortcutRef.current(event)
+    document.addEventListener('keydown', listener)
+    return () => document.removeEventListener('keydown', listener)
+  }, [])
 
   // 原音播放时逐词高亮（卡拉OK效果），当前词变化时跟随滚动，方便边听边看。
   useEffect(() => {
@@ -640,7 +680,20 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
       <div className="page-head review-head">
         <div>
           <div className="eyebrow">03 · 剪辑与导出</div>
-          <h1>剪辑与导出</h1>
+          {titleDraft === null ? (
+            <h1 className="review-title">
+              <span>{session?.title ?? '剪辑与导出'}</span>
+              {session && <button type="button" className="iconbtn" aria-label="重命名" title="重命名（也是导出文件名和音频标题）" onClick={() => setTitleDraft(session.title)}>✎</button>}
+            </h1>
+          ) : (
+            <form className="review-title-form" onSubmit={(event) => { event.preventDefault(); handleRename() }}>
+              <input aria-label="会话标题" value={titleDraft} maxLength={120} autoFocus disabled={busy}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Escape') setTitleDraft(null) }} />
+              <button className="btn btn--primary" type="submit" disabled={busy || !titleDraft.trim()}>保存</button>
+              <button className="btn" type="button" disabled={busy} onClick={() => setTitleDraft(null)}>取消</button>
+            </form>
+          )}
           <p>在转写里选中要删的内容或重录，确认建议后生成成片并导出。时间均以剪辑前的录音为准。</p>
         </div>
         <dl className="review-metrics" aria-label="剪辑概况">
@@ -731,7 +784,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
             }</p>}
             {transcript.length === 0 && <p className="card__hint">{asrJob?.status === 'COMPLETED' ? '未识别到可转写的语音。' : '转写完成后，点击起点和终点，或拖过多个词来选择，再点“删除选中文字”。词间停顿也可选择删除。'}</p>}
             {transcript.some((token) => !token.jobId) && <p className="card__hint">未标记时间的文字来自历史候选，不是语音识别结果。</p>}
-            {transcript.some((token) => token.jobId) && <details className="transcript-help"><summary>选词与剪辑说明</summary><p className="card__hint">点击一个词确定起点，再点另一词扩展范围；也可直接拖选。手机和电脑操作一致。“‧‧‧0.8s”表示可选的词间停顿。选中后可删除或重录；导出转写仍对应剪辑前录音。</p></details>}
+            {transcript.some((token) => token.jobId) && <details className="transcript-help"><summary>选词与剪辑说明</summary><p className="card__hint">点击一个词确定起点，再点另一词扩展范围；也可直接拖选。手机和电脑操作一致。“‧‧‧0.8s”表示可选的词间停顿。选中后可删除、重录或设为章节；导出转写仍对应剪辑前录音。电脑上可用快捷键：空格 播放/暂停，Delete 删除选中，Esc 取消选择。</p></details>}
 
             {transcript.length === 0 && ready && !asrRunning && (
               <div className="empty-state">
@@ -981,6 +1034,10 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
       </div>
 
       <Card id="review-output" title="生成与导出" hint="确认剪辑后生成成片，试听满意再下载。重叠的删除区间只删一次。">
+        {session && <div className="episode-meta">
+          <h3>节目封面</h3>
+          <CoverPicker session={session} onChange={(updated) => { setSession(updated); onDataChange() }} disabled={busy} />
+        </div>}
         <div className="render-actions">
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" checked={smoothCuts} disabled={busy} onChange={(event) => setSmoothCuts(event.target.checked)} />

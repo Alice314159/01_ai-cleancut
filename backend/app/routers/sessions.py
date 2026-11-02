@@ -36,7 +36,7 @@ from app.schemas import (
     UpdateSessionIn,
     WarningOut,
 )
-from app.services import audio_analysis, audio_export, storage, stub_pipeline, transcription
+from app.services import audio_analysis, audio_export, cover as cover_service, storage, stub_pipeline, transcription
 from app.routers.recording_ws import stop_recording
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -300,11 +300,14 @@ def export_version_audio(
     if not source.exists():
         raise HTTPException(status_code=404, detail="audio file missing on disk")
     title, version_type = session.title, version.version_type
+    cover = Path(storage.session_dir(session_id)) / session.cover_filename if session.cover_filename else None
+    if cover is not None and not cover.is_file():
+        cover = None
     from app.routers.chapters import chapters_for_version
     mapped = chapters_for_version(db, session_id, version)
     db.close()  # 转码可能耗时较长，不占用数据库连接
     try:
-        path = audio_export.ensure_export(session_id, version_id, source, format, bitrate, title=title, chapters=mapped)
+        path = audio_export.ensure_export(session_id, version_id, source, format, bitrate, title=title, chapters=mapped, cover=cover)
     except audio_export.EncoderUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except audio_export.ExportError as exc:
@@ -312,6 +315,43 @@ def export_version_audio(
     spec = audio_export.FORMATS[format]
     return FileResponse(path, media_type=spec.media_type,
                         filename=audio_export.download_name(title, version_type, spec.extension))
+
+
+@router.put("/{session_id}/cover", response_model=RecordingSessionOut)
+async def upload_cover(session_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """上传或替换节目封面；导出 MP3 / M4A 时写入文件。"""
+    _get_session_or_404(db, session_id)
+    data = await file.read(cover_service.MAX_COVER_BYTES + 1)
+    try:
+        filename = cover_service.save(session_id, data)
+    except cover_service.CoverError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    session = _get_session_or_404(db, session_id)
+    session.cover_filename = filename
+    db.commit()
+    cover_service.remove_files(session_id, keep=filename)
+    db.refresh(session)
+    return _to_session_out(db, session)
+
+
+@router.get("/{session_id}/cover")
+def get_cover(session_id: str, db: Session = Depends(get_db)):
+    session = _get_session_or_404(db, session_id)
+    path = Path(storage.session_dir(session_id)) / session.cover_filename if session.cover_filename else None
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="no cover")
+    # 文件名随封面变化，URL 带版本号，可以放心长缓存
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+@router.delete("/{session_id}/cover", response_model=RecordingSessionOut)
+def delete_cover(session_id: str, db: Session = Depends(get_db)):
+    session = _get_session_or_404(db, session_id)
+    session.cover_filename = None
+    db.commit()
+    cover_service.remove_files(session_id)
+    db.refresh(session)
+    return _to_session_out(db, session)
 
 
 @router.get("/{session_id}/roles", response_model=list[RoleAssignmentOut])

@@ -70,6 +70,8 @@ export type SessionDetail = {
   }
   clockDrift: Record<string, number | boolean> | null
   warnings: Warning[]
+  /** 有节目封面时为随封面变化的版本号，没有为 null */
+  coverVersion?: string | null
 }
 
 export class DecisionConflictError extends Error {
@@ -92,6 +94,11 @@ class ApiError extends Error {
 function demoAudioUrl(sessionId: string, versionId: string): string | null {
   const hook = (globalThis as Record<string, unknown>).__CLEANCUT_DEMO_AUDIO__ as ((s: string, v: string) => string) | undefined
   return hook ? hook(sessionId, versionId) || null : null
+}
+
+function demoCoverUrl(sessionId: string): string | null {
+  const hook = (globalThis as Record<string, unknown>).__CLEANCUT_DEMO_COVER__ as ((s: string) => string) | undefined
+  return hook ? hook(sessionId) || null : null
 }
 
 export type ExportFormat = 'mp3' | 'm4a'
@@ -269,6 +276,17 @@ export const api = {
       throw new Error(error?.detail ?? '成片字幕导出失败')
     }
     return response.blob()
+  },
+  uploadCover(id: string, file: File) {
+    const body = new FormData()
+    body.append('file', file)
+    return request<SessionDetail>(`/api/sessions/${id}/cover`, { method: 'PUT', body })
+  },
+  deleteCover(id: string) {
+    return request<SessionDetail>(`/api/sessions/${id}/cover`, { method: 'DELETE' })
+  },
+  coverUrl(id: string, version: string) {
+    return demoCoverUrl(id) ?? `${API_BASE}/api/sessions/${id}/cover?v=${encodeURIComponent(version)}`
   },
   listChapters(id: string) {
     return request<Chapter[]>(`/api/sessions/${id}/chapters`)

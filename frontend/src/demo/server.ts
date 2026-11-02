@@ -55,6 +55,7 @@ type DemoSession = {
 }
 
 const sessions = new Map<string, DemoSession>()
+const covers = new Map<string, string>() // sessionId → blob URL
 const urls = new Map<string, string>()
 
 function createSession(title: string, projectId: string, script: Item[], createdMinutesAgo: number, transcribed: boolean): DemoSession {
@@ -161,7 +162,7 @@ function listItem(s: DemoSession) {
     totalDurationMs: d.totalDurationMs, createdAt: d.createdAt }
 }
 
-async function handle(method: string, path: string, query: URLSearchParams, body: Json): Promise<Response> {
+async function handle(method: string, path: string, query: URLSearchParams, body: Json, form?: FormData): Promise<Response> {
   if (path === '/api/health') return json(200, { status: 'ok' })
   if (path === '/api/sessions' && method === 'GET') {
     return json(200, [...sessions.values()].sort((a, b) => String(b.detail.createdAt).localeCompare(String(a.detail.createdAt))).map(listItem))
@@ -185,6 +186,23 @@ async function handle(method: string, path: string, query: URLSearchParams, body
   if (rest === '' && method === 'PATCH') { Object.assign(session.detail, body.title ? { title: body.title } : {}, body.projectId ? { projectId: body.projectId } : {}); return json(200, session.detail) }
   if (rest === '' && method === 'DELETE') { sessions.delete(match[1]); return json(204, null) }
   if (rest === 'import') return json(201, session.detail)
+  if (rest === 'cover' && method === 'PUT') {
+    const file = form?.get('file')
+    if (!(file instanceof Blob) || !file.type.startsWith('image/')) return json(422, { detail: '封面仅支持 JPEG、PNG 或 WebP 图片' })
+    if (file.size > 5 * 1024 * 1024) return json(422, { detail: '封面图片不能超过 5MB' })
+    const previous = covers.get(match[1])
+    if (previous) URL.revokeObjectURL(previous)
+    covers.set(match[1], URL.createObjectURL(file))
+    session.detail.coverVersion = String(Date.now())
+    return json(200, session.detail)
+  }
+  if (rest === 'cover' && method === 'DELETE') {
+    const previous = covers.get(match[1])
+    if (previous) URL.revokeObjectURL(previous)
+    covers.delete(match[1])
+    session.detail.coverVersion = null
+    return json(200, session.detail)
+  }
   if (rest === 'stop') return json(200, session.detail)
   if (rest === 'versions') return json(200, session.versions)
   if (rest === 'roles') return json(200, session.roles)
@@ -367,6 +385,7 @@ export function installDemo() {
     { id: uid('ch'), startMs: at('下面'), title: '动手流程' },
   ]
 
+  ;(globalThis as Record<string, unknown>).__CLEANCUT_DEMO_COVER__ = (sessionId: string) => covers.get(sessionId) ?? ''
   ;(globalThis as Record<string, unknown>).__CLEANCUT_DEMO_AUDIO__ = (sessionId: string, versionId: string) => {
     const key = `${sessionId}/${versionId}`
     const blob = sessions.get(sessionId)?.audio.get(versionId)
@@ -383,6 +402,6 @@ export function installDemo() {
     let body: Json = {}
     if (typeof init?.body === 'string') { try { body = JSON.parse(init.body) as Json } catch { body = {} } }
     await new Promise((resolve) => window.setTimeout(resolve, 120)) // 模拟一点网络延迟，让加载态可见
-    return handle((init?.method ?? 'GET').toUpperCase(), url.pathname, url.searchParams, body)
+    return handle((init?.method ?? 'GET').toUpperCase(), url.pathname, url.searchParams, body, init?.body instanceof FormData ? init.body : undefined)
   }
 }

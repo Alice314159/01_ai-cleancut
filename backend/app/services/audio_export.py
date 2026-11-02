@@ -54,9 +54,9 @@ def encoder_available(encoder: str) -> bool:
     return re.search(rf"^\s*A\S*\s+{re.escape(encoder)}\s", result.stdout.decode(errors="ignore"), re.M) is not None
 
 
-def metadata_signature(title: str = "", chapters=()) -> str:
-    """标题与章节决定文件内容，必须进缓存键：改名或改章节后不能再拿到旧文件。"""
-    payload = json.dumps([title, [(c.start_ms, c.end_ms, c.title) for c in chapters]], ensure_ascii=False)
+def metadata_signature(title: str = "", chapters=(), cover: Path | None = None) -> str:
+    """标题、章节、封面决定文件内容，必须进缓存键：改名、改章节或换封面后不能再拿到旧文件。"""
+    payload = json.dumps([title, [(c.start_ms, c.end_ms, c.title) for c in chapters], cover.name if cover else None], ensure_ascii=False)
     return hashlib.sha256(payload.encode()).hexdigest()[:10]
 
 
@@ -66,7 +66,7 @@ def export_path(session_id: str, version_id: str, fmt: str, bitrate_kbps: int, s
 
 
 def ensure_export(session_id: str, version_id: str, source: Path, fmt: str, bitrate_kbps: int,
-                  title: str = "", chapters=()) -> Path:
+                  title: str = "", chapters=(), cover: Path | None = None) -> Path:
     """返回已编码好的文件路径；不存在时现场转码。chapters 为该版本时间轴上的章节（含 end_ms）。"""
     if fmt not in FORMATS:
         raise ExportError(f"不支持的导出格式：{fmt}")
@@ -74,7 +74,7 @@ def ensure_export(session_id: str, version_id: str, source: Path, fmt: str, bitr
         raise ExportError(f"不支持的码率：{bitrate_kbps} kbps")
     spec = FORMATS[fmt]
     title = (title or "")[:200]
-    destination = export_path(session_id, version_id, fmt, bitrate_kbps, metadata_signature(title, chapters))
+    destination = export_path(session_id, version_id, fmt, bitrate_kbps, metadata_signature(title, chapters, cover))
     if destination.is_file() and destination.stat().st_size > 0:
         return destination
     if not encoder_available(spec.encoder):
@@ -86,9 +86,14 @@ def ensure_export(session_id: str, version_id: str, source: Path, fmt: str, bitr
     # 标题和章节写进 FFmpeg 元数据文件，再整体映射；源文件自带的元数据一律不带出。
     meta = destination.with_name(f".{uuid.uuid4().hex}.ffmeta")
     meta.write_text(chapter_service.ffmetadata(list(chapters), title), encoding="utf-8")
-    command = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(source), "-f", "ffmetadata", "-i", str(meta),
-               "-map", "0:a", "-map_metadata", "1", "-map_chapters", "1" if chapters else "-1",
-               "-c:a", spec.encoder, "-b:a", f"{bitrate_kbps}k", *spec.extra_args, str(temp)]
+    command = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(source), "-f", "ffmetadata", "-i", str(meta)]
+    if cover is not None:
+        command += ["-i", str(cover)]
+    command += ["-map", "0:a", "-map_metadata", "1", "-map_chapters", "1" if chapters else "-1"]
+    if cover is not None:
+        # 封面作为附图（attached picture）写入：MP3 → ID3 APIC，M4A → covr
+        command += ["-map", "2:v", "-c:v", "copy", "-disposition:v:0", "attached_pic"]
+    command += ["-c:a", spec.encoder, "-b:a", f"{bitrate_kbps}k", *spec.extra_args, str(temp)]
     try:
         result = subprocess.run(command, capture_output=True, timeout=TIMEOUT_SECONDS)
         if result.returncode or not temp.is_file() or temp.stat().st_size == 0:

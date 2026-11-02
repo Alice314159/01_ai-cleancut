@@ -67,3 +67,6 @@ class RecordingSession(Base):
     # 创建时间（纳秒）。id 是随机 hex，不能用来排序；列表按它倒序显示最新会话。
     # 旧库迁移时补 0，输出层显示为未知时间，排序回落到 rowid 保持插入顺序。
     created_at_ns: Mapped[int] = mapped_column(BigInteger, default=time.time_ns)
+
+    # 节目封面（会话目录下的文件名，名字带时间戳，换封面即换文件名，导出缓存与浏览器缓存随之失效）
+    cover_filename: Mapped[str | None] = mapped_column(String, nullable=True)

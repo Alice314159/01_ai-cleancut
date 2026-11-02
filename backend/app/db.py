@@ -63,6 +63,9 @@ def init_db() -> None:
         # 旧会话没有记录创建时间：补 0（输出为 null），列表排序回落到 rowid。
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE recording_sessions ADD COLUMN created_at_ns BIGINT NOT NULL DEFAULT 0"))
+    if "cover_filename" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE recording_sessions ADD COLUMN cover_filename VARCHAR"))
 
     columns = {column["name"] for column in inspect(engine).get_columns("transcript_tokens")}
     with engine.begin() as connection:

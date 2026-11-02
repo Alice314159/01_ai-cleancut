@@ -65,6 +65,13 @@ class RecordingSessionOut(PersistenceStatusOut, AnalysisLocalityOut):
     capture_processing: CaptureProcessingStateOut
     clock_drift: ClockDriftReportOut | None = None
     warnings: list[WarningOut] = []
+    cover_filename: str | None = Field(default=None, exclude=True)
+
+    @computed_field(alias="coverVersion")
+    @property
+    def cover_version(self) -> str | None:
+        """有封面时为一个随封面变化的版本号（前端拼到封面 URL 上防缓存），没有封面为 null。"""
+        return self.cover_filename.rsplit(".", 1)[0].removeprefix("cover_") if self.cover_filename else None
 
 
 class RecordingSessionListItemOut(PersistenceStatusOut):
