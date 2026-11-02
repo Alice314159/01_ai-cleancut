@@ -100,7 +100,27 @@ class TestSessionCrud:
         body = resp.json()
         assert len(body) == 2
         for item in body:
-            assert set(item.keys()) == {"id", "title", "projectId", "captureMode", "processingStatus", "totalDurationMs", "captureStatus", "localPersistenceStatus", "uploadStatus", "serverMergeStatus", "liveAnalysisStatus"}
+            assert set(item.keys()) == {"id", "title", "projectId", "captureMode", "processingStatus", "totalDurationMs", "captureStatus", "localPersistenceStatus", "uploadStatus", "serverMergeStatus", "liveAnalysisStatus", "createdAt"}
+            assert item["createdAt"].endswith("+00:00")
+
+    def test_list_sessions_newest_first(self, client):
+        """id 是随机 hex，不能作为排序依据；列表必须按创建先后倒序。"""
+        titles = [f"会话{i}" for i in range(8)]
+        for title in titles:
+            client.post("/api/sessions", json={"title": title})
+        body = client.get("/api/sessions").json()
+        assert [item["title"] for item in body] == list(reversed(titles))
+
+    def test_legacy_sessions_without_timestamp_keep_insertion_order(self, client, isolated_backend):
+        from app.models import RecordingSession
+        with isolated_backend() as db:
+            for title in ("旧1", "旧2", "旧3"):
+                db.add(RecordingSession(title=title, created_at_ns=0))
+                db.commit()
+        client.post("/api/sessions", json={"title": "新"})
+        body = client.get("/api/sessions").json()
+        assert [item["title"] for item in body] == ["新", "旧3", "旧2", "旧1"]
+        assert body[1]["createdAt"] is None
 
     def test_list_sessions_exposes_project_id_for_project_filtering(self, client):
         client.post("/api/sessions", json={"title": "会话1", "projectId": "proj_podcast"})
@@ -384,3 +404,11 @@ def test_legacy_server_save_is_not_browser_persistence(client, isolated_backend)
     assert row['captureStatus'] == 'STOPPED'
     assert row['serverMergeStatus'] == 'FAILED'
     assert row['uploadStatus'] == 'RECEIVING'
+
+
+def test_sqlite_connections_use_wal_and_busy_timeout(isolated_backend):
+    """后台线程与请求并发写库：需要 WAL + busy_timeout，避免瞬时锁冲突直接报错。"""
+    from sqlalchemy import text
+    with isolated_backend() as db:
+        assert db.execute(text("PRAGMA journal_mode")).scalar().lower() == "wal"
+        assert db.execute(text("PRAGMA busy_timeout")).scalar() == 5000

@@ -112,6 +112,24 @@ def test_chinese_output_is_converted_to_simplified(isolated_backend, source, mon
         assert token.text == '这是测试'
 
 
+def test_missing_zhconv_still_completes_without_conversion(isolated_backend, source, monkeypatch):
+    """zhconv 缺失不能让整次中文转写失败——保留原文字，任务照常完成。"""
+    class ChineseEngine:
+        def transcribe(self, filename, **kwargs):
+            return iter([NS(start=0.0, end=1.0, text='這是測試', words=[
+                NS(start=0.0, end=1.0, word='這是測試'),
+            ])]), NS(language='zh')
+
+    monkeypatch.setattr(transcription, 'get_model', lambda *args: ChineseEngine())
+    monkeypatch.setattr(transcription, 'dependency_available', lambda: True)
+    monkeypatch.setattr(transcription, '_zh_converter', lambda: None)
+    job_id = job(isolated_backend, source)
+    transcription.run_transcription(job_id)
+    with isolated_backend() as db:
+        assert db.get(TranscriptionJob, job_id).status == 'COMPLETED'
+        assert db.query(TranscriptToken).one().text == '這是測試'
+
+
 def test_generator_failure_keeps_previous_success(isolated_backend, source, monkeypatch):
     previous_id = previous_tokens(isolated_backend, source)
     class BrokenEngine:

@@ -5,16 +5,19 @@ import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
+DATA_DIR = Path(os.environ.get("CLEANCUT_DATA_DIR", str(BASE_DIR / "data"))).expanduser()
 AUDIO_DIR = DATA_DIR / "audio"
 DB_PATH = DATA_DIR / "cleancut.db"
 
 DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 # CORS：本地开发时前端跑在 vite 默认端口
+# 前端换端口或用局域网地址访问时，用逗号分隔的 CLEANCUT_CORS_ORIGINS 覆盖。
+_DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"
 CORS_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    origin.strip()
+    for origin in os.environ.get("CLEANCUT_CORS_ORIGINS", _DEFAULT_CORS_ORIGINS).split(",")
+    if origin.strip()
 ]
 
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)

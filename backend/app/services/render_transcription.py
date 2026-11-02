@@ -73,8 +73,7 @@ def run(job_id):
             for segment in segments:
                 for word in transcription.timed_words(segment, duration):
                     if info.language == 'zh':
-                        import zhconv
-                        word['text'] = zhconv.convert(word['text'], 'zh-hans')
+                        word['text'] = transcription.to_simplified(word['text'])
                     tokens.append(word)
                 job.progress = max(job.progress, min(.99, max(0, segment.end * 1000 / max(1, duration))))
                 db.commit()

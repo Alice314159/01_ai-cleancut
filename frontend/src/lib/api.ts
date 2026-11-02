@@ -31,6 +31,8 @@ export type SessionListItem = {
   liveAnalysisStatus: string
   processingStatus: string
   totalDurationMs: number
+  /** ISO 8601；迁移前的旧会话没有记录创建时间，为 null。 */
+  createdAt: string | null
 }
 
 /** 会话详情，对应后端 RecordingSessionOut。 */

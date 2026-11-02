@@ -1,4 +1,6 @@
-from pydantic import field_serializer
+from datetime import datetime, timezone
+
+from pydantic import Field, computed_field, field_serializer
 
 from app.schemas.common import CamelModel, WarningOut
 
@@ -78,6 +80,15 @@ class RecordingSessionListItemOut(PersistenceStatusOut):
     live_analysis_status: str
     processing_status: str
     total_duration_ms: int
+    created_at_ns: int = Field(default=0, exclude=True)
+
+    @computed_field(alias="createdAt")
+    @property
+    def created_at(self) -> str | None:
+        """ISO 8601（UTC）。迁移前的旧会话没有记录创建时间，返回 null。"""
+        if not self.created_at_ns:
+            return None
+        return datetime.fromtimestamp(self.created_at_ns / 1e9, tz=timezone.utc).isoformat(timespec="seconds")
 
 
 class CreateSessionIn(CamelModel):

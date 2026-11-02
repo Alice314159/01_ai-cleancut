@@ -67,8 +67,13 @@ def create_session(body: CreateSessionIn, db: Session = Depends(get_db)):
 
 @router.get("", response_model=list[RecordingSessionListItemOut])
 def list_sessions(db: Session = Depends(get_db)):
-    sessions = db.query(RecordingSession).order_by(RecordingSession.id.desc()).all()
-    return sessions
+    # 新会话在前。id 是随机 hex，按它排序会让新建会话出现在列表任意位置；
+    # 旧库迁移的会话 created_at_ns 都是 0，再按 rowid 倒序保持插入顺序。
+    return (
+        db.query(RecordingSession)
+        .order_by(RecordingSession.created_at_ns.desc(), text("recording_sessions.rowid DESC"))
+        .all()
+    )
 
 
 @router.get("/{session_id}", response_model=RecordingSessionOut)

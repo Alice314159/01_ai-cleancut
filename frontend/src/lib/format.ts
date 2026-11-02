@@ -16,6 +16,21 @@ export function dur(ms: number): string {
   return m > 0 ? `${m} 分 ${String(s).padStart(2, '0')} 秒` : `${s} 秒`
 }
 
+/**
+ * 会话创建时间：今天只显示时分，今年显示月日时分，跨年带上年份。
+ * 无效或缺失时间返回 null，由调用方决定是否显示。
+ */
+export function createdLabel(iso: string | null | undefined, now: Date = new Date()): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const p2 = (n: number) => String(n).padStart(2, '0')
+  const hm = `${p2(d.getHours())}:${p2(d.getMinutes())}`
+  if (d.toDateString() === now.toDateString()) return `今天 ${hm}`
+  const md = `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`
+  return d.getFullYear() === now.getFullYear() ? md : `${d.getFullYear()}年${md}`
+}
+
 export function pct(v: number, digits = 1): string {
   return `${(v * 100).toFixed(digits)}%`
 }

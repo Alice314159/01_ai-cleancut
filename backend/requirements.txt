@@ -6,3 +6,5 @@ python-multipart>=0.0.12
 aiofiles>=24.1.0
 websockets>=13.1
 numpy>=2.0.0
+# 纯 Python 小包：中文转写结果繁转简。缺失时转写仍可完成，只是不转换。
+zhconv>=1.4,<2

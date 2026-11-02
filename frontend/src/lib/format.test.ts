@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { db, dur, pct, tc, toDbfs } from './format'
+import { createdLabel, db, dur, pct, tc, toDbfs } from './format'
 
 describe('tc', () => {
   it('formats zero as mm:ss.mmm', () => {
@@ -73,5 +73,26 @@ describe('toDbfs', () => {
 
   it('matches the standard 20*log10 amplitude-to-dBFS conversion', () => {
     expect(toDbfs(0.5)).toBeCloseTo(20 * Math.log10(0.5), 10)
+  })
+})
+
+describe('createdLabel', () => {
+  const now = new Date(2026, 10, 2, 15, 0)
+
+  it('returns null for missing or invalid timestamps', () => {
+    expect(createdLabel(null, now)).toBeNull()
+    expect(createdLabel('not-a-date', now)).toBeNull()
+  })
+
+  it('shows only the time for sessions created today', () => {
+    expect(createdLabel(new Date(2026, 10, 2, 9, 5).toISOString(), now)).toBe('今天 09:05')
+  })
+
+  it('shows month and day within the same year', () => {
+    expect(createdLabel(new Date(2026, 0, 31, 23, 59).toISOString(), now)).toBe('1月31日 23:59')
+  })
+
+  it('includes the year for older sessions', () => {
+    expect(createdLabel(new Date(2025, 11, 1, 8, 0).toISOString(), now)).toBe('2025年12月1日 08:00')
   })
 })

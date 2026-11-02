@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Card, Chip, Stat } from '../components/Bits'
 import { ImportAudioButton } from '../components/ImportAudioButton'
-import { dur } from '../lib/format'
+import { createdLabel, dur } from '../lib/format'
 import { api, type SessionListItem } from '../lib/api'
 import type { RouteKey } from '../components/AppShell'
 
@@ -199,6 +199,7 @@ export function SessionsPage({
           const status = PROCESSING_LABEL[r.processingStatus] ?? { label: r.processingStatus }
           const busy = busyId === r.id
           const open = () => onSelectSession(r.id, routeForRow(r))
+          const created = createdLabel(r.createdAt)
 
           if (editingId === r.id) {
             return (
@@ -252,6 +253,7 @@ export function SessionsPage({
                 <span className="mono">{r.id}</span>
                 <button className="session-project" onClick={() => setProjectFilter(r.projectId)} title="按此项目筛选">{r.projectId}</button>
                 <span>{MODE_LABEL[r.captureMode]}</span>
+                {created && <time dateTime={r.createdAt ?? undefined}>{created}</time>}
                 <span className="session-row__duration">{dur(r.totalDurationMs)}</span>
               </div>
               <div className="session-row__stages" aria-label="处理阶段">

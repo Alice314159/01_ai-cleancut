@@ -1,6 +1,7 @@
+import time
 import uuid
 
-from sqlalchemy import JSON, Integer, String
+from sqlalchemy import BigInteger, JSON, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -62,3 +63,7 @@ class RecordingSession(Base):
 
     # 展示用字段，SessionsPage 需要
     title: Mapped[str] = mapped_column(String, default="未命名录制")
+
+    # 创建时间（纳秒）。id 是随机 hex，不能用来排序；列表按它倒序显示最新会话。
+    # 旧库迁移时补 0，输出层显示为未知时间，排序回落到 rowid 保持插入顺序。
+    created_at_ns: Mapped[int] = mapped_column(BigInteger, default=time.time_ns)

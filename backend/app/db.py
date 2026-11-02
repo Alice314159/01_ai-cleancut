@@ -1,6 +1,7 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import DATABASE_URL
@@ -10,6 +11,27 @@ engine = create_engine(
     connect_args={"check_same_thread": False},  # SQLite + 多线程/WS 访问需要这个
 )
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+@event.listens_for(Engine, "connect")
+def _configure_sqlite(dbapi_connection, _record) -> None:
+    """
+    增强、转写、终态化都在后台线程里写库，同时 HTTP / WS 请求也在写。SQLite 默认的
+    rollback journal 下读写互斥，且锁冲突会立刻抛 "database is locked"。
+    WAL 让读不阻塞写；busy_timeout 让短暂的写锁竞争排队等待而不是直接失败。
+    挂在 Engine 类上，测试里另建的临时引擎也会生效。
+    """
+    import sqlite3
+
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA busy_timeout = 5000")
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA synchronous = NORMAL")
+    finally:
+        cursor.close()
 
 
 class Base(DeclarativeBase):
@@ -35,6 +57,12 @@ def init_db() -> None:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE enhancement_jobs ADD COLUMN created_at_ns BIGINT NOT NULL DEFAULT 0"))
             connection.execute(text("UPDATE enhancement_jobs SET created_at_ns = rowid"))
+
+    columns = {column["name"] for column in inspect(engine).get_columns("recording_sessions")}
+    if "created_at_ns" not in columns:
+        # 旧会话没有记录创建时间：补 0（输出为 null），列表排序回落到 rowid。
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE recording_sessions ADD COLUMN created_at_ns BIGINT NOT NULL DEFAULT 0"))
 
     columns = {column["name"] for column in inspect(engine).get_columns("transcript_tokens")}
     with engine.begin() as connection:

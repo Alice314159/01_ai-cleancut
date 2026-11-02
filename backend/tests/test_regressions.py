@@ -288,3 +288,17 @@ async def test_closed_notification_socket_does_not_fail_capture(isolated_backend
             assert db.get(RecordingSession, session_id).live_analysis_status == 'FINALIZED'
     finally:
         manager.disconnect(session_id, socket)
+
+
+def test_legacy_sessions_table_gains_created_at(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy_sessions.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE recording_sessions (id TEXT PRIMARY KEY, title TEXT)"))
+        connection.execute(text("INSERT INTO recording_sessions (id, title) VALUES ('rs_zz', 'a'), ('rs_aa', 'b')"))
+    monkeypatch.setattr(db_module, "engine", engine)
+    db_module.init_db()
+    db_module.init_db()
+    with engine.connect() as connection:
+        rows = connection.execute(text("SELECT id, created_at_ns FROM recording_sessions ORDER BY rowid")).all()
+    assert rows == [("rs_zz", 0), ("rs_aa", 0)]
+    engine.dispose()

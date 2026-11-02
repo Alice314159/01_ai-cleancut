@@ -1,6 +1,7 @@
 """Local, post-recording Whisper inference; publish complete transcripts atomically."""
 from functools import lru_cache
 import importlib.util
+import logging
 import math
 from pathlib import Path
 import threading
@@ -9,6 +10,8 @@ from sqlalchemy import text
 
 from app import config, db as db_module
 from app.models import EditDecision, AudioVersion, RecordingSession, RoleAssignment, TranscriptToken, TranscriptionJob
+
+logger = logging.getLogger(__name__)
 
 ACTIVE_STATUSES = ("QUEUED", "LOADING_MODEL", "TRANSCRIBING")
 # Avoid multiple CPU model instances competing for memory. DB sessions stay in this worker thread.
@@ -52,6 +55,22 @@ def _restore_word_punctuation(segment_text: str, words) -> list[str]:
         punctuation = ''.join(ch for ch in gap if ch in _SENTENCE_PUNCTUATION)
         texts.append(word.word + punctuation)
     return texts
+
+
+@lru_cache(maxsize=1)
+def _zh_converter():
+    """zhconv 是可选依赖：缺失时返回 None，转写照常完成，只是不做繁转简。"""
+    try:
+        import zhconv
+    except ImportError:
+        logger.warning("未安装 zhconv，中文转写结果不会转换为简体；请执行 pip install zhconv")
+        return None
+    return zhconv.convert
+
+
+def to_simplified(content: str) -> str:
+    convert = _zh_converter()
+    return convert(content, "zh-hans") if convert else content
 
 
 def dependency_available() -> bool:
@@ -127,13 +146,11 @@ def run_transcription(job_id: str) -> None:
             # still comes back Traditional) — convert to Simplified so it matches what a
             # Simplified-Chinese speaker actually typed/said, not a script mismatch bug.
             simplify_chinese = info.language == "zh"
-            if simplify_chinese:
-                import zhconv
             tokens = []
             for segment in segments:
                 for word in timed_words(segment, duration_ms):
                     if simplify_chinese:
-                        word["text"] = zhconv.convert(word["text"], "zh-hans")
+                        word["text"] = to_simplified(word["text"])
                     tokens.append(word)
                 job.progress = max(job.progress, min(0.99, max(0.0, segment.end * 1000 / max(1, duration_ms))))
                 db.commit()
