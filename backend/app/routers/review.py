@@ -10,7 +10,7 @@ from app.models import AudioVersion, EditDecision, RecordingSession, RenderOutpu
 from app.schemas import EditDecisionOut, TranscriptTokenOut, UpdateDecisionIn
 
 from app.schemas.audio import AudioVersionOut
-from app.schemas.decision import BatchDecisionsIn
+from app.schemas.decision import BatchDecisionsIn, RestoreDecisionsIn
 from app.schemas.render import CreateManualDecisionIn, RenderOutputOut, RenderOptionsIn, SuggestPausesIn
 from app.schemas.common import CamelModel
 from app.services import pause_suggestions, rendering, suggestions, transcript_export, retakes, render_transcription
@@ -202,6 +202,68 @@ def export_transcript(session_id: str, transcriptionJobId: str, format: Literal[
         "Content-Disposition": f'attachment; filename="transcript-original.{format}"',
         "Cache-Control": "no-store",
     })
+
+
+# 可以被撤销/重做重建的决策类型；保护区间和硬保护决策不在此列，永远不会被删除或重建。
+RESTORABLE_ACTIONS = {"DELETE_SELECTION", "DELETE_REPETITION", "DELETE_STUTTER", "DELETE_FILLER", "COMPRESS_SILENCE", "REPLACE_AUDIO"}
+
+
+@router.post("/decisions/restore", response_model=list[EditDecisionOut])
+def restore_decisions(session_id: str, body: RestoreDecisionsIn, db: Session = Depends(get_db)):
+    """
+    撤销 / 重做：在一个写事务里把涉及的决策恢复到前端记录的状态。
+    先核对 expected_revisions（涉及且当前存在的决策都必须提供且一致），
+    有任何一条被别处改过就整体 409，绝不部分应用，也不覆盖别人的修改。
+    """
+    session = db.get(RecordingSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    target_ids = {d.id for d in body.target}
+    if target_ids & set(body.remove):
+        raise HTTPException(status_code=422, detail="同一决策不能既恢复又删除")
+    db.rollback()
+    db.execute(text("BEGIN IMMEDIATE"))
+    involved = target_ids | set(body.remove)
+    current = {d.id: d for d in db.query(EditDecision).filter(EditDecision.id.in_(involved)).all()} if involved else {}
+    for decision_id, decision in current.items():
+        if decision.session_id != session_id:
+            db.rollback()
+            raise HTTPException(status_code=404, detail="decision not found")
+        if body.expected_revisions.get(decision_id) != decision.revision:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="剪辑决策已被其他操作修改，无法撤销；已为你刷新到最新状态")
+        if decision.hard_protected or decision.action == "KEEP_PROTECTED":
+            db.rollback()
+            raise HTTPException(status_code=409, detail="保护区间不能撤销或重做")
+    for decision_id in body.remove:
+        if decision_id in current:
+            db.delete(current[decision_id])
+    for state in body.target:
+        decision = current.get(state.id)
+        if decision is not None:
+            decision.accepted = state.accepted
+            decision.revision += 1
+            continue
+        if state.action not in RESTORABLE_ACTIONS or not state.start_ms < state.end_ms <= session.total_duration_ms:
+            db.rollback()
+            raise HTTPException(status_code=422, detail="无法恢复这条决策")
+        if state.action == "REPLACE_AUDIO":
+            take = db.get(AudioVersion, state.replacement_version_id) if state.replacement_version_id else None
+            if take is None or take.session_id != session_id or take.version_type != "retake":
+                db.rollback()
+                raise HTTPException(status_code=409, detail="重录音频已不存在，无法恢复")
+        elif db.get(EditDecision, state.id) is not None:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="决策编号冲突，无法恢复")
+        db.add(EditDecision(
+            id=state.id, session_id=session_id, start_ms=state.start_ms, end_ms=state.end_ms, action=state.action,
+            reason=state.reason, text=state.text, confidence=state.confidence, source=state.source,
+            hard_protected=False, review_required=state.review_required, accepted=state.accepted, revision=0,
+            replacement_version_id=state.replacement_version_id if state.action == "REPLACE_AUDIO" else None,
+            replacement_duration_ms=state.replacement_duration_ms if state.action == "REPLACE_AUDIO" else None,
+        ))
+    db.commit()
+    return list_decisions(session_id, db)
 
 
 @router.get("/render/{version_id}/subtitles")

@@ -82,7 +82,7 @@ export class DecisionConflictError extends Error {
   }
 }
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
     super(message)
@@ -246,6 +246,10 @@ export const api = {
   },
   rejectPendingSuggestions(sessionId: string, decisions: EditDecision[]) {
     return request<EditDecision[]>(`/api/sessions/${sessionId}/decisions/reject-suggestions`, { method: 'POST', body: JSON.stringify({ expectedRevisions: Object.fromEntries(decisions.map((d) => [d.id, d.revision])) }) })
+  },
+  /** 撤销 / 重做：把涉及的决策恢复到给定状态；任何一条修订号不一致时整体 409。 */
+  restoreDecisions(sessionId: string, plan: { target: EditDecision[]; remove: string[]; expectedRevisions: Record<string, number> }) {
+    return request<EditDecision[]>(`/api/sessions/${sessionId}/decisions/restore`, { method: 'POST', body: JSON.stringify(plan) })
   },
   confirmDecisions(sessionId: string, decisions: EditDecision[]) {
     return request<EditDecision[]>(`/api/sessions/${sessionId}/decisions/confirm`, { method: 'POST', body: JSON.stringify({ expectedRevisions: Object.fromEntries(decisions.map((d) => [d.id, d.revision])) }) })

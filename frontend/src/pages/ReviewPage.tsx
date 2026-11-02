@@ -5,11 +5,12 @@ import { ChapterPanel } from '../components/ChapterPanel'
 import { CoverPicker } from '../components/CoverPicker'
 import { Card, Chip } from '../components/Bits'
 import { isBoolean, oneOf, usePref } from '../lib/prefs'
+import { makeEntry, planRestore, push, type HistoryEntry } from '../lib/history'
 import { WarningList } from '../components/WarningList'
 import { WaveformRibbon } from '../components/WaveformRibbon'
 import { envelope as mockEnvelope } from '../mock/data'
 import { ACTION_LABEL, dur, isCutAction, LOUDNESS_TARGET_LABEL, loudnessSummary, tc } from '../lib/format'
-import { api, DecisionConflictError, EXPORT_BITRATES, type ExportFormat, type SessionDetail } from '../lib/api'
+import { api, ApiError, DecisionConflictError, EXPORT_BITRATES, type ExportFormat, type SessionDetail } from '../lib/api'
 import type { AudioVersion, Chapter, EditDecision, LoudnessTarget, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
 
 const FALLBACK_WAVE = mockEnvelope(190, 19)
@@ -29,6 +30,31 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const [session, setSession] = useState<SessionDetail | null>(null)
   const [source, setSource] = useState<AudioVersion | null>(null)
   const [decisions, setDecisions] = useState<EditDecision[]>([])
+  // 撤销 / 重做。decisionsRef 在提交时立即更新，保证连续操作计算差异时拿到的是最新状态。
+  const decisionsRef = useRef<EditDecision[]>([])
+  const [undoStack, setUndoStack] = useState<HistoryEntry[]>([])
+  const [redoStack, setRedoStack] = useState<HistoryEntry[]>([])
+  const [historyToast, setHistoryToast] = useState<{ text: string; canUndo: boolean } | null>(null)
+  const toastTimerRef = useRef<number | undefined>(undefined)
+  const showToast = (text: string, canUndo: boolean) => {
+    window.clearTimeout(toastTimerRef.current)
+    setHistoryToast({ text, canUndo })
+    toastTimerRef.current = window.setTimeout(() => setHistoryToast(null), 6000)
+  }
+  /** 提交新的决策列表；给 label 时记入撤销历史并清空重做。 */
+  const applyDecisions = (next: EditDecision[], label?: string) => {
+    if (label) {
+      const entry = makeEntry(label, decisionsRef.current, next)
+      if (entry) { setUndoStack((stack) => push(stack, entry)); setRedoStack([]); showToast(label, true) }
+    }
+    decisionsRef.current = next
+    setDecisions(next)
+  }
+  /** 从服务器整体重载：之前的历史可能已对不上，清空。 */
+  const resetDecisions = (next: EditDecision[]) => {
+    decisionsRef.current = next
+    setDecisions(next); setUndoStack([]); setRedoStack([])
+  }
   const [transcript, setTranscript] = useState<TranscriptToken[]>([])
   const [warnings, setWarnings] = useState<Warning[]>([])
   const [waveform, setWaveform] = useState<number[] | null>(null)
@@ -130,7 +156,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
       api.listChapters(sessionId),
     ])
     if (revision !== loadRevisionRef.current) return detail
-    setSession(detail); setDecisions(ds); setTranscript(ts); setWarnings(ws); setRendered(output); setAsrJob(transcriptionJob); setChapters(chapterList)
+    setSession(detail); resetDecisions(ds); setTranscript(ts); setWarnings(ws); setRendered(output); setAsrJob(transcriptionJob); setChapters(chapterList)
     const sourceId = roles.find((role) => role.role === 'RENDER_SOURCE')?.audioVersionId
     setSource(versions.find((version) => version.id === sourceId) ?? null)
     setLoaded(true)
@@ -176,7 +202,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
           const [tokens, updatedDecisions, output] = await Promise.all([api.getTranscript(sessionId), api.getDecisions(sessionId), api.getRender(sessionId)])
           if (cancelled) return
           if (busyRef.current || revision !== loadRevisionRef.current) { timer = window.setTimeout(poll, 300); return }
-          setTranscript(tokens); setDecisions(updatedDecisions); setRendered(output); setSuggestionMessage('')
+          setTranscript(tokens); resetDecisions(updatedDecisions); setRendered(output); setSuggestionMessage('')
           wordAnchorRef.current = null; setWordSelection(null)
         }
         setAsrJob(latest)
@@ -205,13 +231,14 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const saveChoice = async (decision: EditDecision, accepted: boolean | null) => {
     try {
       const updated = await api.updateDecision(sessionId, decision.id, accepted, decision.revision)
-      setDecisions((ds) => ds.map((d) => d.id === updated.id ? updated : d))
+      const verb = accepted === true ? (isCutAction(decision.action) ? '确认删除' : '接受') : accepted === false ? '拒绝' : '改为待确认'
+      applyDecisions(decisionsRef.current.map((d) => d.id === updated.id ? updated : d), `${verb}${decision.text ? `「${decision.text.slice(0, 12)}」` : ` ${ACTION_LABEL[decision.action] ?? ''}`}`)
       setConflict(null)
       setRendered((previous) => previous ? { ...previous, stale: true } : null)
     } catch (e) {
       if (!(e instanceof DecisionConflictError)) throw e
       setConflict({ current: e.current, intended: accepted })
-      setDecisions((ds) => ds.map((d) => d.id === e.current.id ? e.current : d))
+      applyDecisions(decisionsRef.current.map((d) => d.id === e.current.id ? e.current : d))
       setRendered((previous) => previous ? { ...previous, stale: true } : null)
     }
   }
@@ -237,12 +264,12 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const choiceLabel = (accepted: boolean | null) => accepted === null ? '待确认' : accepted ? '接受' : '拒绝'
 
   const handleConfirmAll = () => perform(async () => {
-    setDecisions(await api.confirmDecisions(sessionId, decisions))
+    applyDecisions(await api.confirmDecisions(sessionId, decisions), '确认全部待定项')
     setRendered((previous) => previous ? { ...previous, stale: true } : null)
   })
 
   const handleRejectSuggestions = () => perform(async () => {
-    setDecisions(await api.rejectPendingSuggestions(sessionId, decisions))
+    applyDecisions(await api.rejectPendingSuggestions(sessionId, decisions), '拒绝待定建议')
     setRendered((previous) => previous ? { ...previous, stale: true } : null)
   })
 
@@ -273,7 +300,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
         throw new Error('请填写有效的开始和结束时间，结束时间必须更晚。')
       }
       const created = await api.addManualDecision(sessionId, start, end)
-      setDecisions((ds) => [...ds, created].sort((a, b) => a.startMs - b.startMs))
+      applyDecisions([...decisionsRef.current, created].sort((a, b) => a.startMs - b.startMs), `删除 ${tc(start)}–${tc(end)}`)
       setRendered((previous) => previous ? { ...previous, stale: true } : null)
       clearWordSelection()
     })
@@ -282,7 +309,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const handleDeleteSelectedText = () => perform(async () => {
     if (!wordSelection) return
     const created = await api.addManualDecision(sessionId, wordSelection.startMs, wordSelection.endMs)
-    setDecisions((ds) => [...ds, created].sort((a, b) => a.startMs - b.startMs))
+    applyDecisions([...decisionsRef.current, created].sort((a, b) => a.startMs - b.startMs), `删除「${(wordSelectionText || '选中片段').slice(0, 16)}」`)
     setRendered((previous) => previous ? { ...previous, stale: true } : null)
     clearWordSelection()
   })
@@ -330,6 +357,29 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
       document.body.appendChild(link); link.click(); link.remove()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     } finally { setExporting(null) }
+  })
+
+  const runHistory = (direction: 'undo' | 'redo') => perform(async () => {
+    const stack = direction === 'undo' ? undoStack : redoStack
+    const entry = stack[stack.length - 1]
+    if (!entry) return
+    const [to, from] = direction === 'undo' ? [entry.before, entry.after] : [entry.after, entry.before]
+    try {
+      const next = await api.restoreDecisions(sessionId, planRestore(to, from, decisionsRef.current))
+      decisionsRef.current = next
+      setDecisions(next)
+      if (direction === 'undo') { setUndoStack((s) => s.slice(0, -1)); setRedoStack((s) => [...s, entry]) }
+      else { setRedoStack((s) => s.slice(0, -1)); setUndoStack((s) => [...s, entry]) }
+      setRendered((previous) => previous ? { ...previous, stale: true } : null)
+      setConflict(null); setSuggestionMessage(''); setPauseMessage('')
+      showToast(`${direction === 'undo' ? '已撤销' : '已重做'}：${entry.label}`, false)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        await loadAll()
+        throw new Error(`${e.message}（撤销记录已清空）`)
+      }
+      throw e
+    }
   })
 
   const handleRename = () => perform(async () => {
@@ -380,7 +430,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     // 保留时长取停顿阈值的三分之一，夹在 0.3–0.8 秒之间：句间仍有自然的呼吸感。
     const keepMs = Math.min(800, Math.max(300, Math.round(minPauseMs / 3)))
     const result = await api.suggestPauses(sessionId, minPauseMs, keepMs)
-    setDecisions(result.decisions)
+    applyDecisions(result.decisions, '查找过长停顿')
     setPauseMessage(result.addedCount
       ? `找到 ${result.addedCount} 处过长停顿，已加入待确认，每处保留约 ${(keepMs / 1000).toFixed(1)} 秒。`
       : '没有找到新的过长停顿；已有决策覆盖的区间会跳过，底噪过大时也无法可靠判断。')
@@ -391,7 +441,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     const jobId = transcript[0]?.jobId
     if (!jobId) return
     const result = await api.suggestDecisions(sessionId, jobId)
-    setDecisions(result.decisions)
+    applyDecisions(result.decisions, '查找重复与语气词')
     setSuggestionMessage(result.addedCount ? `新增 ${result.addedCount} 条建议，请试听后接受或拒绝。` : '没有新增建议；已处理或重叠的区间会跳过。')
     if (result.addedCount) setRendered((previous) => previous ? { ...previous, stale: true } : null)
   })
@@ -413,9 +463,18 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   // 输入框、下拉框、打开的对话框里不拦截；处理函数每次渲染更新到 ref，监听只挂一次。
   const shortcutRef = useRef<(event: KeyboardEvent) => void>(() => undefined)
   shortcutRef.current = (event) => {
-    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+    if (event.defaultPrevented) return
     const target = event.target as HTMLElement | null
     if (target?.closest('input, textarea, select, [contenteditable="true"], dialog[open]') || document.querySelector('dialog[open]')) return
+    if ((event.metaKey || event.ctrlKey) && !event.altKey) {
+      const key = event.key.toLowerCase()
+      if (key === 'z' || key === 'y') {
+        event.preventDefault()
+        if (!busy) void runHistory(key === 'y' || event.shiftKey ? 'redo' : 'undo')
+      }
+      return
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return
     const onTranscript = !!target?.closest('.transcript-word, .transcript-pause')
     if (event.key === ' ' && (onTranscript || !target?.closest('button, a, summary, audio'))) {
       const audio = audioRef.current
@@ -696,11 +755,19 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
           )}
           <p>在转写里选中要删的内容或重录，确认建议后生成成片并导出。时间均以剪辑前的录音为准。</p>
         </div>
+        <div className="review-head__side">
+        <div className="history-bar" role="group" aria-label="撤销与重做">
+          <button type="button" className="btn" disabled={busy || !undoStack.length} onClick={() => void runHistory('undo')}
+            title={undoStack.length ? `撤销：${undoStack[undoStack.length - 1].label}（Ctrl/⌘+Z）` : '没有可撤销的操作'}>↶ 撤销</button>
+          <button type="button" className="btn" disabled={busy || !redoStack.length} onClick={() => void runHistory('redo')}
+            title={redoStack.length ? `重做：${redoStack[redoStack.length - 1].label}（Ctrl/⌘+Shift+Z）` : '没有可重做的操作'}>↷ 重做</button>
+        </div>
         <dl className="review-metrics" aria-label="剪辑概况">
           <div><dt>原长</dt><dd>{totalMs > 0 ? dur(totalMs) : '—'}</dd></div>
           <div className={savedMs > 0 ? 'is-ok' : undefined}><dt>{savedMs >= 0 ? '预计缩短' : '预计增加'}</dt><dd>{dur(Math.abs(savedMs))}</dd></div>
           <div className={pending.length ? 'is-warn' : undefined}><dt>待确认</dt><dd>{pending.length}</dd></div>
         </dl>
+        </div>
       </div>
 
       <section className="workflow-guide review-workflow" aria-label="剪辑流程">
@@ -784,7 +851,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
             }</p>}
             {transcript.length === 0 && <p className="card__hint">{asrJob?.status === 'COMPLETED' ? '未识别到可转写的语音。' : '转写完成后，点击起点和终点，或拖过多个词来选择，再点“删除选中文字”。词间停顿也可选择删除。'}</p>}
             {transcript.some((token) => !token.jobId) && <p className="card__hint">未标记时间的文字来自历史候选，不是语音识别结果。</p>}
-            {transcript.some((token) => token.jobId) && <details className="transcript-help"><summary>选词与剪辑说明</summary><p className="card__hint">点击一个词确定起点，再点另一词扩展范围；也可直接拖选。手机和电脑操作一致。“‧‧‧0.8s”表示可选的词间停顿。选中后可删除、重录或设为章节；导出转写仍对应剪辑前录音。电脑上可用快捷键：空格 播放/暂停，Delete 删除选中，Esc 取消选择。</p></details>}
+            {transcript.some((token) => token.jobId) && <details className="transcript-help"><summary>选词与剪辑说明</summary><p className="card__hint">点击一个词确定起点，再点另一词扩展范围；也可直接拖选。手机和电脑操作一致。“‧‧‧0.8s”表示可选的词间停顿。选中后可删除、重录或设为章节；导出转写仍对应剪辑前录音。电脑上可用快捷键：空格 播放/暂停，Delete 删除选中，Esc 取消选择，Ctrl/⌘+Z 撤销，Ctrl/⌘+Shift+Z 重做。</p></details>}
 
             {transcript.length === 0 && ready && !asrRunning && (
               <div className="empty-state">
@@ -1109,6 +1176,14 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
       </Card>
 
 
+      {historyToast && (
+        <div className="toast history-toast" role="status">
+          <span>{historyToast.text}</span>
+          {historyToast.canUndo && undoStack.length > 0 && (
+            <button type="button" className="btn btn--link" disabled={busy} onClick={() => { setHistoryToast(null); void runHistory('undo') }}>撤销</button>
+          )}
+        </div>
+      )}
     </>
   )
 }

@@ -1726,3 +1726,15 @@ select:disabled { opacity: .55; cursor: not-allowed; }
 .cover-picker__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cover-picker__body { min-width: 0; display: grid; gap: 6px; }
 .cover-picker__body .card__hint { margin: 0; }
+
+/* 撤销 / 重做 */
+.review-head__side { display: grid; gap: 8px; justify-items: end; }
+.history-bar { display: flex; gap: 6px; }
+.history-bar .btn { padding: 5px 12px; font-size: var(--step--1); }
+.history-toast { bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+.history-toast span { color: var(--text); }
+@container app (max-width: 860px) {
+  .review-head__side { justify-items: stretch; }
+  .history-bar { justify-content: flex-end; }
+  .history-toast { bottom: calc(var(--tabbar-h) + 16px + env(safe-area-inset-bottom, 0px)); }
+}

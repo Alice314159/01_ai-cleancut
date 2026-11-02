@@ -274,6 +274,24 @@ async function handle(method: string, path: string, query: URLSearchParams, body
     decision.revision = (decision.revision ?? 0) + 1
     return json(200, decision)
   }
+  if (rest === 'decisions/restore') {
+    const target = (body.target ?? []) as EditDecision[]
+    const remove = (body.remove ?? []) as string[]
+    const expected = (body.expectedRevisions ?? {}) as Record<string, number>
+    const involved = [...target.map((d) => d.id), ...remove]
+    for (const id of involved) {
+      const live = session.decisions.find((d) => d.id === id)
+      if (live && expected[id] !== (live.revision ?? 0)) return json(409, { detail: '剪辑决策已被其他操作修改，无法撤销；已为你刷新到最新状态' })
+    }
+    session.decisions = session.decisions.filter((d) => !remove.includes(d.id))
+    for (const state of target) {
+      const live = session.decisions.find((d) => d.id === state.id)
+      if (live) { live.accepted = state.accepted; live.revision = (live.revision ?? 0) + 1 }
+      else session.decisions.push({ ...state, hardProtected: false, revision: 0 })
+    }
+    session.decisions.sort((x, y) => x.startMs - y.startMs)
+    return json(200, session.decisions)
+  }
   if (rest === 'decisions/confirm') { session.decisions.forEach((d) => { if (d.accepted === null) { d.accepted = true; d.revision = (d.revision ?? 0) + 1 } }); return json(200, session.decisions) }
   if (rest === 'decisions/reject-suggestions') {
     session.decisions.forEach((d) => { if (d.accepted === null && ['transcript_rule', 'silence_rule'].includes(d.source)) { d.accepted = false; d.revision = (d.revision ?? 0) + 1 } })
