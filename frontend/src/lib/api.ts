@@ -18,8 +18,11 @@ import type {
 /**
  * 后端地址。开发时后端默认跑在 8001；部署时通过 VITE_API_BASE 覆盖。
  */
+// 设为空字符串表示“与页面同源”：局域网/手机访问时由前端服务器代理 /api 与 /ws（见 vite.config.ts）。
 export const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8001'
-export const WS_BASE = API_BASE.replace(/^http/, 'ws')
+export const WS_BASE = API_BASE
+  ? API_BASE.replace(/^http/, 'ws')
+  : typeof window === 'undefined' ? '' : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
 
 /** SessionsPage 用的精简会话视图，对应后端 RecordingSessionListItemOut。 */
 export type SessionListItem = {

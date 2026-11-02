@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'node:fs'
 
 /**
  * 把构建产物内联成单个 HTML 文件。
@@ -50,9 +51,29 @@ function guard(code: string, tag: 'script' | 'style') {
   return code.split(`</${tag}`).join(`<\\/${tag}`)
 }
 
+/**
+ * 局域网 / 手机访问（./start.sh --lan）：
+ * - 用自签名证书开 HTTPS——手机浏览器只在 HTTPS 下允许麦克风录音；
+ * - /api 与 /ws 由这里代理到本机后端，手机只需信任这一个地址，后端仍只监听 127.0.0.1。
+ */
+function devHttps() {
+  const key = process.env.CLEANCUT_HTTPS_KEY
+  const cert = process.env.CLEANCUT_HTTPS_CERT
+  return key && cert ? { key: readFileSync(key), cert: readFileSync(cert) } : undefined
+}
+
+const BACKEND = process.env.CLEANCUT_BACKEND_URL ?? 'http://127.0.0.1:8001'
+
 export default defineConfig({
   base: './',
   plugins: [react(), singleFile()],
+  server: {
+    https: devHttps(),
+    proxy: {
+      '/api': { target: BACKEND, changeOrigin: true },
+      '/ws': { target: BACKEND.replace(/^http/, 'ws'), ws: true, changeOrigin: true },
+    },
+  },
   build: {
     target: 'es2020',
     cssCodeSplit: false,

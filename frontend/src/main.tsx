@@ -16,3 +16,9 @@ function mount() {
 // 条件在构建时就是常量，正常构建会把演示代码整个摇树删掉（构建后可 grep 确认）。
 if (import.meta.env.VITE_DEMO === '1') installDemo()
 mount()
+
+// “添加到主屏幕”后可像 App 一样打开。仅在 https / localhost 下注册；
+// 本地文件、内嵌预览等环境不支持时静默跳过。
+if ('serviceWorker' in navigator && window.isSecureContext && /^https?:$/.test(window.location.protocol)) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('./sw.js').catch(() => undefined) })
+}
