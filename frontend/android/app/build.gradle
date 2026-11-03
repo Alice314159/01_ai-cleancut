@@ -27,11 +27,23 @@ android {
             keyAlias "androiddebugkey"
             keyPassword "android"
         }
+        // 正式签名：只在 CI 提供了密钥时启用（见 .github/workflows/android-apk.yml），密钥不进仓库
+        if (System.getenv("CLEANCUT_RELEASE_KEYSTORE")) {
+            release {
+                storeFile file(System.getenv("CLEANCUT_RELEASE_KEYSTORE"))
+                storePassword System.getenv("CLEANCUT_RELEASE_STORE_PASSWORD")
+                keyAlias System.getenv("CLEANCUT_RELEASE_KEY_ALIAS")
+                keyPassword System.getenv("CLEANCUT_RELEASE_KEY_PASSWORD")
+            }
+        }
     }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (System.getenv("CLEANCUT_RELEASE_KEYSTORE")) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

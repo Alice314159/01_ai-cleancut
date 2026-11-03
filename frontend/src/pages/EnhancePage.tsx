@@ -189,7 +189,7 @@ export function EnhancePage({
             <p className="card__hint declip-hint">检测到{quality.contentType === 'music_dominant' ? '以音乐为主' : '背景音乐'}：降噪会把音乐当作噪声削弱，建议选轻度或跳过降噪。</p>
           )}
           {quality.contentType === 'no_speech' && <p className="card__hint declip-hint">没有检测到人声，请确认录音或导入的文件是否正确。</p>}
-          <p className="card__hint quality-footnote">以上为信号分析估算值（素材类型按音量节奏与频谱特征判断，不区分单人与多人），结合试听判断音质。</p>
+          <p className="card__hint quality-footnote">以上为信号分析估算值（素材类型按音量节奏与频谱特征判断；音高明显不同的多人会标为多人对话，音高接近的多人分不出），结合试听判断音质。</p>
         </Card>
 
         <Card title="音质增强" hint="可修复破音（削波）并降噪，处理后对比原音与结果。">

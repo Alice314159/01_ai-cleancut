@@ -1,10 +1,19 @@
 # 自动打包安卓 APK（调试签名，可直接安装测试）。
 # 触发：手动运行（Actions → Android APK → Run workflow），或前端代码有改动时推送触发。
 # 产物：在运行详情页底部的 Artifacts 下载 cleancut-android-apk（zip 内为 app-debug.apk）。
+# 正式签名（可选）：在仓库 Settings → Secrets and variables → Actions 添加
+#   ANDROID_RELEASE_KEYSTORE_BASE64（keystore 文件的 base64）、ANDROID_RELEASE_STORE_PASSWORD、
+#   ANDROID_RELEASE_KEY_ALIAS、ANDROID_RELEASE_KEY_PASSWORD，
+# 之后每次运行额外产出 cleancut-android-release（正式签名的 APK 与上架用的 AAB）。
 name: Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      release_dry_run:
+        description: '用临时密钥试跑正式签名流程（验证配置用，产物不能用于上架）'
+        type: boolean
+        default: false
   push:
     paths:
       - 'frontend/**'
@@ -21,6 +30,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      HAS_RELEASE_KEY: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 != '' || inputs.release_dry_run == true }}
+      RELEASE_DRY_RUN: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 == '' && inputs.release_dry_run == true }}
     defaults:
       run:
         working-directory: frontend
@@ -63,3 +75,35 @@ jobs:
           path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Build signed release APK and AAB
+        if: env.HAS_RELEASE_KEY == 'true'
+        working-directory: frontend/android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          CLEANCUT_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          CLEANCUT_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          CLEANCUT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: |
+          keystore="$RUNNER_TEMP/release.keystore"
+          trap 'rm -f "$keystore"' EXIT
+          if [ "$RELEASE_DRY_RUN" = "true" ]; then
+            # 试跑：临时生成一次性密钥，只为验证正式签名流程能走通
+            export CLEANCUT_RELEASE_STORE_PASSWORD=dryrun-pass CLEANCUT_RELEASE_KEY_ALIAS=dryrun CLEANCUT_RELEASE_KEY_PASSWORD=dryrun-pass
+            keytool -genkeypair -keystore "$keystore" -storepass dryrun-pass -keypass dryrun-pass -alias dryrun \
+              -keyalg RSA -keysize 2048 -validity 1 -dname "CN=CleanCut dry run"
+          else
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+          fi
+          CLEANCUT_RELEASE_KEYSTORE="$keystore" ./gradlew assembleRelease bundleRelease --no-daemon --stacktrace
+
+      - name: Upload release APK and AAB
+        if: env.HAS_RELEASE_KEY == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RELEASE_DRY_RUN == 'true' && 'cleancut-android-release-dryrun' || 'cleancut-android-release' }}
+          path: |
+            frontend/android/app/build/outputs/apk/release/app-release.apk
+            frontend/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 90

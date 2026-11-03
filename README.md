@@ -78,6 +78,18 @@ uvicorn app.main:app --reload --port 8001
 - App 首次打开选择 **连接电脑** 或 **先看演示**。连接电脑：在电脑上运行 `./start.sh --app`，把终端显示的“App 连接地址”（如 `192.168.1.23:8001`）填进 App；转写、降噪、剪辑仍在电脑上完成，手机负责录音、试听和剪辑操作，首次录音时系统会请求麦克风权限。
 - `--app` 模式下后端在局域网 8001 端口无需登录即可访问，并允许 App 跨域访问，只在家里／办公室等可信网络中使用。电脑防火墙需允许 8001 端口入站。
 - 顶栏“切换连接”可改填地址或改用演示模式。
+- 正式签名（上架或长期分发用）：本机生成自己的密钥（务必另行备份，丢失后无法再更新同一 App），
+  然后在 GitHub 仓库 **Settings → Secrets and variables → Actions** 添加四项：`ANDROID_RELEASE_KEYSTORE_BASE64`（下面命令输出的整段文本）、`ANDROID_RELEASE_STORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`（如 `cleancut`）、`ANDROID_RELEASE_KEY_PASSWORD`。之后每次运行额外产出 `cleancut-android-release`（正式签名的 `app-release.apk` 与应用商店用的 `app-release.aab`）。密钥只在构建机临时解出，构建结束即删除，不进仓库。正式签名与调试签名不同，从调试版改装正式版需先卸载。
+
+```bash
+keytool -genkeypair -v -keystore cleancut-release.keystore -alias cleancut -keyalg RSA -keysize 2048 -validity 10000
+```
+
+```bash
+base64 -w0 cleancut-release.keystore
+```
+
+（macOS 用 `base64 -i cleancut-release.keystore`。）
 
 ### 在电脑上测试 App
 
