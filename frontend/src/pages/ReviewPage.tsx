@@ -20,6 +20,8 @@ const PAUSE_THRESHOLD_MS = 400
 const SENTENCE_PAUSE_MS = 600
 const LANGUAGE_LABEL: Record<string, string> = { zh: '中文', en: '英文', ja: '日文', ko: '韩文' }
 const SENTENCE_END_RE = /[。！？.!?][”’"']?\s*$/
+/** 正文中按“疑似重复”样式标出的待确认建议：整词重复与口吃 */
+const REPEAT_ACTIONS = new Set(['DELETE_REPETITION', 'DELETE_STUTTER'])
 const TOOLS_SECTION_IDS = new Set(['review-advanced', 'review-decisions', 'review-chapters'])
 
 /** 转写词和"停顿间隙"共用的可选中范围——两者都只需要这三个字段。 */
@@ -186,7 +188,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     return () => { cancelled = true; loadRevisionRef.current += 1; window.clearTimeout(timer) }
   }, [loadAll, sessionId])
 
-  const pendingRepetitions = decisions.filter((d) => d.source === 'transcript_rule' && d.action === 'DELETE_REPETITION' && d.accepted === null).length
+  const pendingRepetitions = decisions.filter((d) => d.source === 'transcript_rule' && REPEAT_ACTIONS.has(d.action) && d.accepted === null).length
   const asrJobId = asrJob?.id
   const asrStatus = asrJob?.status
   const asrRunning = !!asrStatus && ['QUEUED', 'LOADING_MODEL', 'TRANSCRIBING'].includes(asrStatus)
@@ -443,7 +445,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     const jobId = transcript[0]?.jobId
     if (!jobId) return
     const result = await api.suggestDecisions(sessionId, jobId)
-    applyDecisions(result.decisions, '查找重复与语气词')
+    applyDecisions(result.decisions, '查找重复、口吃与语气词')
     setSuggestionMessage(result.addedCount ? `新增 ${result.addedCount} 条建议，请试听后接受或拒绝。` : '没有新增建议；已处理或重叠的区间会跳过。')
     if (result.addedCount) setRendered((previous) => previous ? { ...previous, stale: true } : null)
   })
@@ -580,7 +582,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
 
   // 疑似重复的待定建议单独标记，方便在正文中和其它待定删除（如手动选段）区分开。
   const coveredByRepetition = (startMs: number, endMs: number) =>
-    decisions.some((d) => d.accepted === null && d.source === 'transcript_rule' && d.action === 'DELETE_REPETITION' && !d.hardProtected && d.startMs <= startMs && d.endMs >= endMs)
+    decisions.some((d) => d.accepted === null && d.source === 'transcript_rule' && REPEAT_ACTIONS.has(d.action) && !d.hardProtected && d.startMs <= startMs && d.endMs >= endMs)
 
   // 正文 ↔ 决策列表联动：给定一段时间范围，找到覆盖它的那条决策（用于悬停高亮和点击定位）。
   // 重录会在同一个时间范围留下一条已拒绝的旧决策和一条新的 REPLACE_AUDIO 决策；
@@ -850,9 +852,9 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                 {asrRunning ? '转写进行中…' : transcript.length ? '重新转写' : '开始本机转写'}
               </button>
               {transcript.length > 0 && <button className="btn" onClick={handleSuggest} disabled={busy || !ready || asrRunning || transcript.some((token) => !token.jobId || token.endMs == null)}
-                title="相邻重复会在转写后自动提示；语气词需手动查找。建议需试听确认。">查找重复与语气词</button>}
+                title="相邻重复和口吃会在转写后自动提示；语气词需手动查找。建议需试听确认。">查找重复、口吃与语气词</button>}
             </div>
-            {pendingRepetitions > 0 && <button className="pill-badge pill-badge--warn" onClick={() => goToSection('review-decisions')}>疑似重复 {pendingRepetitions} 处 · 复核 →</button>}
+            {pendingRepetitions > 0 && <button className="pill-badge pill-badge--warn" onClick={() => goToSection('review-decisions')}>疑似重复 / 口吃 {pendingRepetitions} 处 · 复核 →</button>}
             {suggestionMessage && <p role="status">{suggestionMessage}</p>}
             {asrJob && <p role="status">{
               asrJob.status === 'QUEUED' ? '等待本机转写…' :
@@ -959,7 +961,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
 
         {decisions.length === 0 && ready && (
           <Card id="review-decisions" title="剪辑决策">
-            <p className="card__hint">还没有剪辑。在左侧转写中选中文字删除，或点“查找重复与语气词”“查找过长停顿”生成建议。</p>
+            <p className="card__hint">还没有剪辑。在左侧转写中选中文字删除，或点“查找重复、口吃与语气词”“查找过长停顿”生成建议。</p>
           </Card>
         )}
         {decisions.length > 0 && (

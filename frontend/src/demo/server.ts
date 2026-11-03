@@ -33,7 +33,7 @@ function layout(items: Item[]): { words: Word[]; durationMs: number } {
 const SCRIPTS: Record<string, Item[]> = {
   episode: ['大家好，', '欢迎', '收听', '第十二期', '节目。', { pause: 2600 }, '今天', '我们', '我们', '想聊一聊', '嗯', '本地优先的', '音频', '工作流。',
     '为什么', '要把', '录音', '和', '剪辑', '都放在', '自己的', '电脑上？', '首先', '是', '隐私，', '其次', '是', '速度，', '嗯', '最后', '是', '不依赖', '网络。',
-    { pause: 2100 }, '下面', '我们', '就', '一步一步', '来看。'],
+    { pause: 2100 }, '下面', '我们', '就', '就是', '一步一步', '来看。'],
   intro: ['你好，', '这里是', '开场白', '试录。', { pause: 1800 }, '这一段', '还没有', '转写，', '可以', '点', '开始', '本机转写', '看看', '效果。'],
   lesson: ['同学们', '好，', '这一讲', '我们', '讲', '响度', '标准化。', { pause: 1500 }, '播客', '常用', '负十六', 'LUFS，', '广播', '用', '负二十三。'],
 }
@@ -301,6 +301,14 @@ async function handle(method: string, path: string, query: URLSearchParams, body
   }
   if (rest === 'decisions/suggest') {
     let added = 0
+    // 词首重复（口吃）：短词是下一个词的前缀，如“就 就是”
+    session.tokens.forEach((t, i) => {
+      const next = session.tokens[i + 1]
+      const cur = t.text.replace(/[，。,.\s]/g, ''), nxt = next?.text.replace(/[，。,.\s]/g, '') ?? ''
+      if (next && cur.length <= 2 && cur.length < nxt.length && nxt.startsWith(cur) && !overlaps(session, t.startMs, t.endMs!)) {
+        addDecision(session, t.startMs, t.endMs!, 'DELETE_STUTTER', t.text, 'transcript_rule', `词首重复：“${cur}”之后紧接着说了完整的“${nxt}”，疑似口吃。请试听确认。`); added += 1
+      }
+    })
     for (const t of session.tokens) {
       if (['嗯', '呃', 'um', 'uh'].includes(t.text.replace(/[，。,.\s]/g, '')) && !overlaps(session, t.startMs, t.endMs!)) {
         addDecision(session, t.startMs, t.endMs!, 'DELETE_FILLER', t.text, 'transcript_rule', '独立语气词规则命中；可能表达回应或犹豫，请结合上下文试听确认。'); added += 1

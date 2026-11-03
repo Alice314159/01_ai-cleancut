@@ -96,3 +96,35 @@ def test_bulk_reject_only_pending_unprotected_rules(isolated_backend, source):
         assert [d['accepted'] for d in response.json()] == [c[-1] for c in cases]
         assert client.post(url).json() == response.json()
         assert client.post('/api/sessions/missing/decisions/reject-suggestions').status_code == 404
+
+
+@pytest.mark.parametrize('texts,expected', [
+    (('我', '我们', '今天'), [('DELETE_STUTTER', 0, 200)]),           # 词首重复
+    (('就', '就是', '这样'), [('DELETE_STUTTER', 0, 200)]),
+    (('th-', ' the', ' plan'), [('DELETE_STUTTER', 0, 200)]),         # 英文半截词
+    (('I', " I'm", ' here'), [('DELETE_STUTTER', 0, 200)]),
+    (('in', ' into', ' it'), [('DELETE_STUTTER', 0, 200)]),          # ≤2 字母也算，需人工确认
+    (('这这个', '问题'), [('DELETE_STUTTER', 0, 67)]),                 # 词内首字重复，按字数估边界
+    (('我我我们',), [('DELETE_STUTTER', 0, 100)]),
+])
+def test_stutter_patterns(texts, expected):
+    result = [(c['action'], c['start_ms'], c['end_ms']) for c in suggestions.candidates(words(*texts), 3000)]
+    assert result == expected
+
+
+@pytest.mark.parametrize('texts', [
+    ('谢谢', '大家'), ('慢慢来',), ('常常说',), ('看看这个',),        # 叠词不是口吃
+    ('我们', '我'),                                                  # 后一个更短：不是词首重复
+    ('大家好', '大家好的'),                                          # 中文超过 2 字的前缀不算
+    ('abo', ' about'), ('the', ' theory'),                           # 英文 3 个字母以上且无“-”不算
+])
+def test_stutter_false_positive_guards(texts):
+    assert [c for c in suggestions.candidates(words(*texts), 3000) if c['action'] == 'DELETE_STUTTER'] == []
+
+
+def test_stutter_requires_close_timing_and_repetition_takes_priority():
+    tokens = words('我', '我们')
+    tokens[1].start_ms, tokens[1].end_ms = 1200, 1500                 # 间隔 1 秒：不算
+    assert not list(suggestions.candidates(tokens, 3000))
+    full = list(suggestions.candidates(words('我们', '我们'), 3000))    # 整词重复仍按“重复”处理
+    assert [c['action'] for c in full] == ['DELETE_REPETITION']
