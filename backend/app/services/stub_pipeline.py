@@ -56,6 +56,31 @@ def schedule_capture_stop(session_id: str) -> asyncio.Task:
     return task
 
 
+# 浏览器开始/停止录音本身有约 0.1–0.2 秒误差，太短的录音测不准漂移
+CLOCK_DRIFT_MIN_MS = 30_000
+# 超过 2% 才提示：这量级只可能是采样率错配之类的问题，不是测量误差
+CLOCK_DRIFT_WARN_PPM = 20_000
+
+
+def clock_drift_report(decoded_samples: int, client_recorded_ms: int | None,
+                       sample_rate: int = audio_analysis.ANALYSIS_SAMPLE_RATE) -> dict | None:
+    """
+    比较“解码得到的采样数”和“浏览器计时的录音时长 × 采样率”。偏差用 ppm 表示；
+    只做测量、不改写音频（drift_remap_applied 恒为 False）。编码器延迟与填充无法从 webm 可靠读出，记 0。
+    """
+    if not client_recorded_ms or client_recorded_ms < CLOCK_DRIFT_MIN_MS:
+        return None
+    expected = round(client_recorded_ms * sample_rate / 1000)
+    return {
+        "decoded_sample_count": int(decoded_samples),
+        "expected_sample_count": int(expected),
+        "clock_drift_ppm": round((decoded_samples - expected) / expected * 1e6, 1),
+        "encoder_delay_samples": 0,
+        "padding_samples": 0,
+        "drift_remap_applied": False,
+    }
+
+
 async def on_capture_stop(session_id: str) -> None:
     """
     Analyze persisted capture; publish readiness only for decodable audio.
@@ -106,7 +131,13 @@ async def on_capture_stop(session_id: str) -> None:
             silence_coverage=metrics.silence_coverage, noise_types=metrics.noise_types,
             content_type=content.content_type, content_type_confidence=content.confidence, content_type_overridden_by_user=False,
         ))
-        session.clock_drift = None
+        session.clock_drift = clock_drift_report(len(samples), session.client_recorded_ms)
+        if session.clock_drift and abs(session.clock_drift["clock_drift_ppm"]) > CLOCK_DRIFT_WARN_PPM:
+            db.add(WarningModel(
+                session_id=session_id, scope="session", code="clock_drift", stage="merge",
+                message=(f"录音时长与实际经过的时间相差 {session.clock_drift['clock_drift_ppm'] / 10000:+.1f}%，"
+                         "可能是设备采样率异常；剪辑和字幕时间可能整体偏移，建议换设备或浏览器重录一小段核对。"),
+            ))
         session.total_duration_ms = duration_ms
         session.committed_duration_ms = duration_ms
         session.local_persistence_status = "NOT_SUPPORTED"

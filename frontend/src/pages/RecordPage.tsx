@@ -10,6 +10,14 @@ import type { SessionDetail } from '../lib/api'
 
 const FALLBACK_WAVE = mockEnvelope(190)
 
+/** 时钟漂移只对 30 秒以上、正常停止的录音测量；百分比更直观（1% = 10000 ppm）。 */
+function clockDriftLabel(drift: SessionDetail['clockDrift']): string {
+  if (!drift) return '未测量（录音不足 30 秒或非正常停止）'
+  const ppm = Number(drift.clockDriftPpm)
+  const pct = `${ppm >= 0 ? '+' : ''}${(ppm / 10000).toFixed(2)}%`
+  return Math.abs(ppm) > 20000 ? `偏差 ${pct}，可能是采样率异常` : `偏差 ${pct}，正常`
+}
+
 export function RecordPage({
   sessionId,
   session,
@@ -177,6 +185,9 @@ export function RecordPage({
             <>
               <KV k="采样率" v={session.captureStatus === 'IDLE' ? '尚未读取' : `${session.actualSampleRate / 1000} kHz · ${session.channelCount} 声道`} />
               <KV k="编码" v={session.captureStatus === 'IDLE' ? '尚未读取' : session.mimeType} />
+              {session.liveAnalysisStatus === 'FINALIZED' && (
+                <KV k="录音时钟" v={clockDriftLabel(session.clockDrift)} tone={Math.abs(Number(session.clockDrift?.clockDriftPpm ?? 0)) > 20000 ? 'warn' : undefined} />
+              )}
               {cp && (
                 <>
                   <KV k="回声消除" v={cp.echoCancellationActual === 'true' ? '开' : cp.echoCancellationActual === 'false' ? '关' : '未知（未录制）'} />

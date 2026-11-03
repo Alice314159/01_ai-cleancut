@@ -55,6 +55,14 @@ export function useRecordingSocket(sessionId: string | null) {
   const reconnectTimerRef = useRef<number | undefined>(undefined)
   const attemptRef = useRef(0)
   const deadRef = useRef(false)
+  // 实际录音时长（扣除暂停），停止时报告给服务端用于估计时钟漂移 / 采样率异常
+  const activeMsRef = useRef(0)
+  const runningSinceRef = useRef<number | null>(null)
+  const markRunning = (running: boolean) => {
+    const now = performance.now()
+    if (runningSinceRef.current !== null) activeMsRef.current += now - runningSinceRef.current
+    runningSinceRef.current = running ? now : null
+  }
 
   const syncPending = useCallback(() => setPendingChunks(queueRef.current.size), [])
 
@@ -173,6 +181,7 @@ export function useRecordingSocket(sessionId: string | null) {
     const operation = (async () => {
       try {
         if (recorder && recorder.state !== 'inactive') {
+          markRunning(false)
           await new Promise<void>((resolve) => {
             recorder.addEventListener('stop', () => resolve(), { once: true })
             recorder.stop()
@@ -181,6 +190,7 @@ export function useRecordingSocket(sessionId: string | null) {
         await convertRef.current.catch(() => undefined)
         stream?.getTracks().forEach((track) => track.stop())
         if (deadRef.current) return
+        const recordedMs = recorder ? Math.round(activeMsRef.current) : undefined
         const drained = !resumableRef.current || await drain(DRAIN_TIMEOUT_MS)
         if (!drained) {
           // 离线停止：不结束服务端会话，未上传部分留在本机，恢复网络后打开此会话自动补传。
@@ -194,7 +204,7 @@ export function useRecordingSocket(sessionId: string | null) {
         resumableRef.current = false
         window.clearTimeout(reconnectTimerRef.current)
         const ws = wsRef.current
-        if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'control', action: 'stop' }))
+        if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'control', action: 'stop', recordedMs }))
         else if (sessionId) await api.stopSession(sessionId)
         if (sessionId) void chunkStore.clear(sessionId)
       } catch (error) {
@@ -253,7 +263,10 @@ export function useRecordingSocket(sessionId: string | null) {
       const settings = stream.getAudioTracks()[0].getSettings()
       ws.send(JSON.stringify({ type: 'control', action: 'start', settings: { ...settings, mimeType: recorder.mimeType, resumable: true } }))
       resumableRef.current = true
+      activeMsRef.current = 0
+      runningSinceRef.current = null
       recorder.start(TIMESLICE_MS)
+      markRunning(true)
       setCaptureState('RECORDING')
     } catch (error) {
       setConnError(error instanceof Error ? error.message : '无法开始录制')
@@ -270,8 +283,8 @@ export function useRecordingSocket(sessionId: string | null) {
     const ws = wsRef.current
     if (!recorder || stoppingRef.current) return
     if (ws?.readyState !== WebSocket.OPEN) { setNotice('网络重连中，暂时不能暂停或继续；录音仍在本机进行。'); return }
-    if (action === 'pause' && recorder.state === 'recording') recorder.pause()
-    else if (action === 'resume' && recorder.state === 'paused') recorder.resume()
+    if (action === 'pause' && recorder.state === 'recording') { recorder.pause(); markRunning(false) }
+    else if (action === 'resume' && recorder.state === 'paused') { recorder.resume(); markRunning(true) }
     else return
     ws.send(JSON.stringify({ type: 'control', action }))
     wantedStateRef.current = action === 'pause' ? 'PAUSED' : 'RECORDING'

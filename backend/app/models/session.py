@@ -73,3 +73,6 @@ class RecordingSession(Base):
 
     # 断线续传：已按顺序写入的录音分片数（下一个期望的分片序号）
     received_chunks: Mapped[int] = mapped_column(Integer, default=0)
+
+    # 浏览器报告的实际录音时长（毫秒，扣除暂停），用于估计时钟漂移 / 采样率异常
+    client_recorded_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)

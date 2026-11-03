@@ -207,6 +207,10 @@ async def _handle_control(db, session_id: str, payload: dict) -> None:
         if session.capture_status not in ("RECORDING", "PAUSED"):
             await manager.send_json(session_id, {"type": "error", "code": "invalid_state", "action": action, "status": session.capture_status})
             return
+        recorded = payload.get("recordedMs")
+        if type(recorded) is int and 0 < recorded <= 24 * 3600 * 1000:
+            session.client_recorded_ms = recorded
+            db.commit()
         stop_recording(db, session_id)
     else:
         await manager.send_json(session_id, {"type": "error", "code": "invalid_action"})
