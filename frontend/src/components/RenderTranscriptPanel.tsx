@@ -1,4 +1,5 @@
 import { useEffect, useState, type RefObject } from 'react'
+import { saveFile } from '../lib/saveFile'
 import { api } from '../lib/api'
 import type { RenderTranscript } from '../types/api'
 import { tc } from '../lib/format'
@@ -44,11 +45,7 @@ export function RenderTranscriptPanel({ sessionId, versionId, audioRef, stale }:
     setBusy(true); setError('')
     try {
       const blob = await api.downloadRenderSubtitles(sessionId, versionId, format)
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url; link.download = `transcript-master.${format}`
-      document.body.appendChild(link); link.click(); link.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      await saveFile(blob, `transcript-master.${format}`)
     } catch (e) { setError(e instanceof Error ? e.message : '成片文字导出失败') }
     finally { setBusy(false) }
   }

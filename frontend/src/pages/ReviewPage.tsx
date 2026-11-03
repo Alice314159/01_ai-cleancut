@@ -6,6 +6,7 @@ import { CoverPicker } from '../components/CoverPicker'
 import { Card, Chip } from '../components/Bits'
 import { isBoolean, oneOf, usePref } from '../lib/prefs'
 import { makeEntry, planRestore, push, type HistoryEntry } from '../lib/history'
+import { needsManagedDownload, saveFile } from '../lib/saveFile'
 import { WarningList } from '../components/WarningList'
 import { WaveformRibbon } from '../components/WaveformRibbon'
 import { envelope as mockEnvelope } from '../mock/data'
@@ -344,11 +345,15 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const handleExportMaster = () => perform(async () => {
     if (!rendered) return
     const blob = await api.downloadRenderSubtitles(sessionId, rendered.version.id)
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url; link.download = 'transcript-master.srt'
-    document.body.appendChild(link); link.click(); link.remove()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    await saveFile(blob, 'transcript-master.srt')
+  })
+
+  // 演示页与 App 里下载直链不起作用：先取回文件再交给 saveFile
+  const handleSaveWav = () => perform(async () => {
+    if (!rendered) return
+    const response = await fetch(api.downloadUrl(sessionId, rendered.version.id))
+    if (!response.ok) throw new Error('成片下载失败')
+    await saveFile(await response.blob(), `${(session?.title || 'audio').replace(/[\\/:*?"<>|]+/g, '_')}-成片.wav`)
   })
 
   const handleExportAudio = (format: ExportFormat) => perform(async () => {
@@ -356,11 +361,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     setExporting(format)
     try {
       const { blob, filename } = await api.exportAudio(sessionId, rendered.version.id, format, exportBitrate)
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url; link.download = filename
-      document.body.appendChild(link); link.click(); link.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      await saveFile(blob, filename)
     } finally { setExporting(null) }
   })
 
@@ -424,11 +425,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     const jobId = transcript[0]?.jobId
     if (!jobId) return
     const blob = await api.downloadTranscript(sessionId, jobId, format)
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url; link.download = `transcript-original.${format}`
-    document.body.appendChild(link); link.click(); link.remove()
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    await saveFile(blob, `transcript-original.${format}`)
   })
 
   const handleSuggestPauses = () => perform(async () => {
@@ -1156,7 +1153,9 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
               <div className="export-group">
                 <h3>音频</h3>
                 <div className="export-group__row">
-                  <a className="btn" href={api.downloadUrl(sessionId, rendered.version.id)}>WAV 无损</a>
+                  {needsManagedDownload()
+                    ? <button className="btn" disabled={busy} onClick={handleSaveWav}>WAV 无损</button>
+                    : <a className="btn" href={api.downloadUrl(sessionId, rendered.version.id)}>WAV 无损</a>}
                   {(['mp3', 'm4a'] as const).map((format) => (
                     <button key={format} className="btn" disabled={busy} onClick={() => handleExportAudio(format)}>
                       {exporting === format ? '转码中…' : format.toUpperCase()}

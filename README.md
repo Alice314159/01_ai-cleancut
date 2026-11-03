@@ -88,6 +88,7 @@ uvicorn app.main:app --reload --port 8001
 - App 首次打开选择 **连接电脑** 或 **先看演示**。连接电脑：在电脑上运行 `./start.sh --app`，把终端显示的“App 连接地址”（如 `192.168.1.23:8001`）和“配对码”填进 App；转写、降噪、剪辑仍在电脑上完成，手机负责录音、试听和剪辑操作，首次录音时系统会请求麦克风权限。
 - `--app` 模式下后端在局域网 8001 端口可访问并允许 App 跨域访问；访问需要配对码（见下方“局域网配对码”）。电脑防火墙需允许 8001 端口入站。
 - 顶栏“切换连接”可改填地址或改用演示模式。
+- 导出（音频、字幕、转写）在 App 里会打开系统分享面板：可存到“文件”，或直接发给微信、邮件、网盘等（安卓 WebView 不处理普通下载链接）。
 - 正式签名（上架或长期分发用）：本机生成自己的密钥（务必另行备份，丢失后无法再更新同一 App），
   然后在 GitHub 仓库 **Settings → Secrets and variables → Actions** 添加四项：`ANDROID_RELEASE_KEYSTORE_BASE64`（下面命令输出的整段文本）、`ANDROID_RELEASE_STORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`（如 `cleancut`）、`ANDROID_RELEASE_KEY_PASSWORD`。之后每次运行额外产出 `cleancut-android-release`（正式签名的 `app-release.apk` 与应用商店用的 `app-release.aab`）。密钥只在构建机临时解出，构建结束即删除，不进仓库。正式签名与调试签名不同，从调试版改装正式版需先卸载。
 
