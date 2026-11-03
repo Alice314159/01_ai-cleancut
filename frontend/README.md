@@ -146,3 +146,10 @@ npm run build:demo
 ```
 
 产物是 `dist-demo/index.html` 单个文件，双击即可打开。浏览器内模拟后端：预置三个示例会话、合成的示例音频、转写、剪辑建议、停顿检测、响度与导出流程都可点击体验；录音与重录需要麦克风和真实后端，演示中不可用，导出的文件为示例 WAV。正常 `npm run build` 不包含演示代码。
+
+## 安卓 App（Capacitor）
+
+- `npm run build:app`：App 版网页（`VITE_APP=1`，输出 `dist-app/`）。首次打开选择“连接电脑”或“先看演示”，选择保存在 App 本机。
+- `npx cap sync android`：把 `dist-app/` 同步进 `android/` 工程；`android/` 下运行 `./gradlew assembleDebug` 生成 APK（需要 JDK 17 与 Android SDK）。
+- GitHub 上由 `.github/workflows/android-apk.yml` 自动完成上述步骤，产物在运行页面的 Artifacts。
+- 页面来源为 `http://localhost`（`capacitor.config.json` 中 `androidScheme: http`），以便访问局域网内的 `http://` 后端，同时仍是安全上下文，可使用麦克风。
