@@ -685,3 +685,98 @@ def declip(samples: np.ndarray, *, clip_level: float | None = None, context: int
     gain = min(1.0, headroom / new_peak) if new_peak > 0 else 1.0
     out *= gain
     return DeclipResult(out.astype(np.float32), regions, rebuilt, round(20 * np.log10(gain), 2) if gain < 1 else 0.0)
+
+
+# ─────────────── 内容类型（信号特征估计） ───────────────
+
+@dataclass
+class ContentEstimate:
+    content_type: str   # no_speech | music_dominant | speech_with_music | speech | unknown
+    confidence: float
+    features: dict
+
+
+def _excerpts(samples: np.ndarray, sample_rate: int, seconds: int = 20, count: int = 3) -> list[np.ndarray]:
+    """长录音只取开头、中间、结尾各一段，控制计算量与内存。"""
+    size = seconds * sample_rate
+    if len(samples) <= size * count:
+        return [samples]
+    starts = np.linspace(0, len(samples) - size, count).astype(int)
+    return [samples[s:s + size] for s in starts]
+
+
+def _content_features(x: np.ndarray, sample_rate: int) -> dict | None:
+    x = x.astype(np.float64)
+    hop = sample_rate // 100  # 10ms
+    n = len(x) // hop
+    if n < 100:
+        return None
+    rms = np.sqrt((x[:n * hop].reshape(n, hop) ** 2).mean(1)) + 1e-7
+    level = 20 * np.log10(rms)
+    top = float(np.percentile(level, 95))
+    active = level > max(top - 30, -55)
+    if active.mean() < 0.05 or top < -45:
+        return {"active": float(active.mean())}
+    envelope = rms - rms.mean()
+    spectrum = np.abs(np.fft.rfft(envelope * np.hanning(len(envelope)))) ** 2
+    freqs = np.fft.rfftfreq(len(envelope), 1 / 100)
+    syllabic = float(spectrum[(freqs >= 2.5) & (freqs <= 8)].sum() / (spectrum[(freqs >= 0.5) & (freqs <= 12)].sum() + 1e-12))
+    depth = float(np.std(level[active]))
+    # 频谱：40ms 窗、10ms 步长，只看 150–4000 Hz
+    window = int(0.04 * sample_rate)
+    frames = (len(x) - window) // hop
+    stft = np.abs(np.fft.rfft(np.lib.stride_tricks.sliding_window_view(x, window)[::hop][:frames] * np.hanning(window), axis=1))
+    band_freqs = np.fft.rfftfreq(window, 1 / sample_rate)
+    band = (band_freqs >= 150) & (band_freqs <= 4000)
+    s = stft[:, band] + 1e-9
+    energy = 20 * np.log10(s.max(1))
+    shape = np.log(s)
+    shape = shape - shape.mean(1, keepdims=True)
+    shape /= np.linalg.norm(shape, axis=1, keepdims=True) + 1e-9
+    lag = 30  # 0.3 秒后频谱是否还一样：音乐长音会，说话换音节不会
+    similarity = np.sum(shape[lag:] * shape[:-lag], axis=1)
+    loud = energy > np.percentile(energy, 50)
+    quiet = energy < np.percentile(energy, 30)
+    pair_loud = loud[lag:] & loud[:-lag]
+    pair_quiet = quiet[lag:] & quiet[:-lag]
+    flatness = np.exp(np.log(s).mean(1)) / s.mean(1)
+    return {
+        "active": float(active.mean()),
+        "syllabic": syllabic,
+        "depth_db": depth,
+        "stationarity": float(similarity[pair_loud].mean()) if pair_loud.any() else 0.0,
+        "flatness": float(flatness[loud].mean()) if loud.any() else 0.0,
+        "background_stationarity": float(similarity[pair_quiet].mean()) if pair_quiet.sum() > 10 else 0.0,
+        "background_flatness": float(flatness[quiet].mean()) if quiet.any() else 0.0,
+    }
+
+
+def classify_content(samples: np.ndarray, sample_rate: int = ANALYSIS_SAMPLE_RATE) -> ContentEstimate:
+    """
+    按信号特征粗分素材类型，拿不准时返回 unknown：
+    - 人声：音量按音节节奏（2.5–8 Hz）大幅起伏（标准差 ≥ 4.5 dB）；
+    - 音乐为主：频谱在 0.3 秒后仍基本不变（长音/和弦），且没有说话那样的起伏；
+    - 人声 + 背景音乐：有人声，同时最安静的部分是持续的乐音而不是噪声；
+    - 无人声：几乎没有声音，或只有平坦的噪声。
+    不区分单人与多人（需要说话人分离模型）。
+    """
+    rows = [f for f in (_content_features(part, sample_rate) for part in _excerpts(samples, sample_rate)) if f]
+    if not rows:
+        return ContentEstimate("unknown", 0.0, {})
+    if all(len(r) == 1 for r in rows):
+        return ContentEstimate("no_speech", 0.9, {"active": round(float(np.mean([r["active"] for r in rows])), 3)})
+    rows = [r for r in rows if len(r) > 1]
+    f = {key: float(np.mean([r[key] for r in rows])) for key in rows[0]}
+    speech = f["depth_db"] >= 4.5 and f["syllabic"] >= 0.4
+    # 纯人声的背景（停顿里的房间底噪）持续度约 0.3–0.4，垫了音乐时 ≥0.55；阈值取中间
+    tonal_background = f["background_stationarity"] >= 0.5 and f["background_flatness"] < 0.35
+    rounded = {k: round(v, 3) for k, v in f.items()}
+    if speech and tonal_background:
+        return ContentEstimate("speech_with_music", round(min(0.9, 0.5 + (f["background_stationarity"] - 0.5)), 2), rounded)
+    if speech:
+        return ContentEstimate("speech", round(min(0.9, 0.5 + (f["depth_db"] - 4.5) / 10 + (f["syllabic"] - 0.4)), 2), rounded)
+    if f["stationarity"] >= 0.7 and f["depth_db"] < 4:
+        return ContentEstimate("music_dominant", round(min(0.9, 0.5 + (f["stationarity"] - 0.7) * 2), 2), rounded)
+    if f["flatness"] >= 0.6 and f["stationarity"] < 0.2:
+        return ContentEstimate("no_speech", 0.7, rounded)
+    return ContentEstimate("unknown", 0.0, rounded)

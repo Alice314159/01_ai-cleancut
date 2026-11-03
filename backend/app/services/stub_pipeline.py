@@ -83,6 +83,7 @@ async def on_capture_stop(session_id: str) -> None:
 
         samples = await asyncio.to_thread(audio_analysis.decode_pcm, Path(storage.raw_chunk_path(session_id)))
         metrics = await asyncio.to_thread(audio_analysis.analyze_samples, samples)
+        content = await asyncio.to_thread(audio_analysis.classify_content, samples)
         duration_ms = int(len(samples) / audio_analysis.ANALYSIS_SAMPLE_RATE * 1000)
         original = AudioVersion(
             session_id=session_id, version_type="original", label="原始录音",
@@ -103,7 +104,7 @@ async def on_capture_stop(session_id: str) -> None:
             clipping_ratio=metrics.clipping_ratio, hum_probability=metrics.hum_probability,
             reverb_score=metrics.reverb_score, speech_coverage=metrics.speech_coverage,
             silence_coverage=metrics.silence_coverage, noise_types=metrics.noise_types,
-            content_type="unknown", content_type_confidence=0.0, content_type_overridden_by_user=False,
+            content_type=content.content_type, content_type_confidence=content.confidence, content_type_overridden_by_user=False,
         ))
         session.clock_drift = None
         session.total_duration_ms = duration_ms

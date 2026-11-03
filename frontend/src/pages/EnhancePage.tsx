@@ -184,7 +184,11 @@ export function EnhancePage({
             <span title={`类型置信度 ${quality.contentTypeConfidence.toFixed(2)}`}>素材类型 <strong>{CONTENT_TYPE_LABEL[quality.contentType] ?? quality.contentType}</strong></span>
             <span>识别到的噪声 <strong>{quality.noiseTypes.join('、') || '无'}</strong></span>
           </div>
-          <p className="card__hint quality-footnote">以上为信号分析估算值，结合试听判断音质。</p>
+          {(quality.contentType === 'music_dominant' || quality.contentType === 'speech_with_music') && (
+            <p className="card__hint declip-hint">检测到{quality.contentType === 'music_dominant' ? '以音乐为主' : '背景音乐'}：降噪会把音乐当作噪声削弱，建议选轻度或跳过降噪。</p>
+          )}
+          {quality.contentType === 'no_speech' && <p className="card__hint declip-hint">没有检测到人声，请确认录音或导入的文件是否正确。</p>}
+          <p className="card__hint quality-footnote">以上为信号分析估算值（素材类型按音量节奏与频谱特征判断，不区分单人与多人），结合试听判断音质。</p>
         </Card>
 
         <Card title="音质增强" hint="可修复破音（削波）并降噪，处理后对比原音与结果。">

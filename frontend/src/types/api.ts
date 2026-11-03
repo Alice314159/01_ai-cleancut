@@ -14,6 +14,8 @@ export type ContentType =
   | 'speech_with_overlapping_noise'
   | 'music_dominant'
   | 'no_speech'
+  /** 有人声，但未区分单人或多人 */
+  | 'speech'
   | 'unknown'
 
 export type AudioRole =

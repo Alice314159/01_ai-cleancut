@@ -210,7 +210,7 @@ async function handle(method: string, path: string, query: URLSearchParams, body
   if (rest === 'waveform') return json(200, { envelope: envelope(session.pcm, Number(query.get('buckets') ?? 200)) })
   if (rest === 'quality') return json(200, { qualityGrade: 'GOOD', gradeReason: '演示数据：语音清晰，底噪轻微。', integratedLufs: -21.4, truePeakDbtp: -3.2,
     noiseFloorDbfs: -52, estimatedSnrDb: 31, clippingRatio: 0, humProbability: 0.04, reverbScore: 0.18, speechCoverage: 0.72, silenceCoverage: 0.28,
-    noiseTypes: ['broadband'], contentType: 'unknown', contentTypeConfidence: 0, contentTypeOverriddenByUser: false })
+    noiseTypes: ['broadband'], contentType: 'speech', contentTypeConfidence: 0.85, contentTypeOverriddenByUser: false })
 
   if (versionMatch) {
     const blob = session.audio.get(versionMatch[1])

@@ -59,6 +59,7 @@ export const CONTENT_TYPE_LABEL: Record<string, string> = {
   speech_with_overlapping_noise: '人声 + 重叠干扰',
   music_dominant: '音乐为主',
   no_speech: '无人声',
+  speech: '人声（未区分人数）',
   unknown: '未确定',
 }
 
