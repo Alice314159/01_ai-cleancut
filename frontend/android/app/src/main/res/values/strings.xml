@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CleanCut</string>
+    <string name="title_activity_main">CleanCut</string>
+    <string name="package_name">com.cleancut.app</string>
+    <string name="custom_url_scheme">com.cleancut.app</string>
+</resources>

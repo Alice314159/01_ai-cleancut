@@ -8,6 +8,7 @@ import { ReviewPage } from './pages/ReviewPage'
 import { SessionsPage } from './pages/SessionsPage'
 import { api, type SessionDetail } from './lib/api'
 import type { AudioVersion, RoleAssignment } from './types/api'
+import { appMode, appServer, IS_APP, resetAppMode } from './lib/appConfig'
 
 const LAST_PROJECT_KEY = 'cleancut.lastProjectId'
 
@@ -120,8 +121,12 @@ export default function App() {
         strip={
           <div className="topbar">
             <TimebaseStrip versions={versions} roles={roles} />
-            {import.meta.env.VITE_DEMO === '1' && (
+            {(import.meta.env.VITE_DEMO === '1' || (IS_APP && appMode() === 'demo')) && (
               <span className="demo-badge" title="界面预览：数据为示例，转写、降噪、导出为模拟结果；录音与重录需要连接真实后端。">演示模式</span>
+            )}
+            {IS_APP && (
+              <button type="button" className="app-switch" title={appServer() ? `当前连接 ${appServer()}` : '当前为演示模式'}
+                onClick={() => { resetAppMode(); window.location.reload() }}>切换连接</button>
             )}
             <div className="vp-toggle" role="group" aria-label="预览端形态">
               <button aria-pressed={vp === 'desktop'} onClick={() => setVp('desktop')}>电脑端</button>

@@ -9,17 +9,20 @@ FRONTEND_PID=''
 
 fail() { printf '错误：%s\n' "$*" >&2; exit 1; }
 usage() {
-  printf '用法：./start.sh [--lan] [--check]\n'
+  printf '用法：./start.sh [--lan] [--app] [--check]\n'
   printf '  默认启动前后端，仅本机可访问，Ctrl+C 停止。\n'
   printf '  --lan   让同一 Wi-Fi 下的手机也能访问（HTTPS，自签名证书），用于手机测试。\n'
+  printf '  --app   供安卓 App 连接：后端在局域网 8001 端口可访问（无登录，仅在可信网络使用）。\n'
   printf '  --check 仅检查依赖与端口。\n'
 }
 CHECK_ONLY=0
 LAN=0
+APP=0
 for arg in "$@"; do
   case "$arg" in
     --check) CHECK_ONLY=1 ;;
     --lan) LAN=1 ;;
+    --app) APP=1 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 1 ;;
   esac
@@ -66,10 +69,12 @@ for port in 8001 5173; do
   fi
 done
 LAN_IP=''
+if [[ "$LAN" == 1 || "$APP" == 1 ]]; then
+  LAN_IP="$(lan_ip)"
+  [[ -n "$LAN_IP" ]] || fail '没有找到本机的局域网地址；请连上 Wi-Fi，或用 CLEANCUT_LAN_IP=192.168.x.x 指定。'
+fi
 if [[ "$LAN" == 1 ]]; then
   command -v openssl >/dev/null 2>&1 || fail '局域网模式需要 openssl。'
-  LAN_IP="$(lan_ip)"
-  [[ -n "$LAN_IP" ]] || fail '没有找到本机的局域网地址；请连上 Wi-Fi，或用 CLEANCUT_LAN_IP=192.168.x.x ./start.sh --lan 指定。'
 fi
 printf '依赖与端口检查通过。\n'
 [[ "$CHECK_ONLY" != 1 ]] || exit 0
@@ -92,9 +97,15 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+BACKEND_HOST=127.0.0.1
+if [[ "$APP" == 1 ]]; then
+  # 安卓 App 的页面来源是 http://localhost（Capacitor），需要直接访问后端并允许跨域
+  BACKEND_HOST=0.0.0.0
+  export CLEANCUT_CORS_ORIGINS="${CLEANCUT_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost,https://localhost,capacitor://localhost}"
+fi
 (
   cd "$ROOT/backend"
-  exec "$PYTHON" -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+  exec "$PYTHON" -m uvicorn app.main:app --host "$BACKEND_HOST" --port 8001
 ) >"$RUN_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!
 FRONT_SCHEME=http
@@ -140,6 +151,12 @@ if [[ "$LAN" == 1 ]]; then
   printf '  · Android Chrome：点“高级” → “继续前往”；\n'
   printf '  · iPhone Safari：点“显示详细信息” → “访问此网站”。\n'
   printf '打开后可“添加到主屏幕”，之后像 App 一样从桌面启动。\n'
+  printf '保持此终端打开；按 Ctrl+C 同时停止前后端。\n'
+elif [[ "$APP" == 1 ]]; then
+  printf '\nAI CleanCut 已启动（App 模式）\n'
+  printf '  电脑浏览器：http://127.0.0.1:5173/\n'
+  printf '  App 连接地址：%s:8001   （在手机 App 的“连接电脑”里填写，手机与电脑需连同一个 Wi-Fi）\n' "$LAN_IP"
+  printf '后端此时在局域网内无需登录即可访问，只在家里/办公室等可信网络中使用。\n'
   printf '保持此终端打开；按 Ctrl+C 同时停止前后端。\n'
 else
   printf '\nAI CleanCut 已启动：http://127.0.0.1:5173/\n保持此终端打开；按 Ctrl+C 同时停止前后端。\n'

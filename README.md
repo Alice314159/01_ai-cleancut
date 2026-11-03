@@ -70,6 +70,17 @@ uvicorn app.main:app --reload --port 8001
 `./start.sh --check` 仅检查依赖和端口；日志保存到 `.run/backend.log` 和 `.run/frontend.log`（每次启动覆盖）。
 已有服务占用端口时会提示并退出，不会关闭其他进程。首次依赖安装仍按下方说明完成。
 
+## 安卓 App（GitHub 自动打包）
+
+`frontend/` 用 Capacitor 包装成安卓 App，GitHub Actions 自动编译 APK（`.github/workflows/android-apk.yml`）：前端有改动推送时自动运行，也可以在 GitHub 的 **Actions → Android APK → Run workflow** 手动运行。完成后在该次运行页面底部的 **Artifacts** 下载 `cleancut-android-apk`，解压得到 `app-debug.apk`，传到手机安装（需允许“安装未知来源应用”）。
+
+- APK 使用仓库里固定的调试签名（`frontend/android/app/debug.keystore`，标准调试口令，仅供测试安装，不能上架应用商店），版本号随运行次数递增，新版可直接覆盖安装。
+- App 首次打开选择 **连接电脑** 或 **先看演示**。连接电脑：在电脑上运行 `./start.sh --app`，把终端显示的“App 连接地址”（如 `192.168.1.23:8001`）填进 App；转写、降噪、剪辑仍在电脑上完成，手机负责录音、试听和剪辑操作，首次录音时系统会请求麦克风权限。
+- `--app` 模式下后端在局域网 8001 端口无需登录即可访问，并允许 App 跨域访问，只在家里／办公室等可信网络中使用。电脑防火墙需允许 8001 端口入站。
+- 顶栏“切换连接”可改填地址或改用演示模式。
+
+本地构建 App 版网页：`cd frontend && npm run build:app && npx cap sync android`；有安卓 SDK 时可在 `frontend/android` 运行 `./gradlew assembleDebug`。
+
 ## 在手机上测试
 
 转写、剪辑、导出都在电脑上的后端完成；手机通过同一个 Wi-Fi 访问电脑上的服务，可以“添加到主屏幕”，之后像 App 一样从桌面打开。
