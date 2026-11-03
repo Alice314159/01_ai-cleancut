@@ -152,7 +152,8 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const [previewDecisionId, setPreviewDecisionId] = useState<string | null>(null)
   const [playingTokenId, setPlayingTokenId] = useState<string | null>(null)
 
-  const loadAll = useCallback(async () => {
+  /** historyLabel：把这次重载带来的决策变化记成一步可撤销操作（用于保存重录后），否则清空撤销记录。 */
+  const loadAll = useCallback(async (historyLabel?: string) => {
     const revision = ++loadRevisionRef.current
     const [detail, ds, ts, ws, output, versions, roles, transcriptionJob, chapterList] = await Promise.all([
       api.getSession(sessionId), api.getDecisions(sessionId), api.getTranscript(sessionId),
@@ -160,7 +161,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
       api.listChapters(sessionId),
     ])
     if (revision !== loadRevisionRef.current) return detail
-    setSession(detail); resetDecisions(ds); setTranscript(ts); setWarnings(ws); setRendered(output); setAsrJob(transcriptionJob); setChapters(chapterList)
+    setSession(detail); if (historyLabel) applyDecisions(ds, historyLabel); else resetDecisions(ds); setTranscript(ts); setWarnings(ws); setRendered(output); setAsrJob(transcriptionJob); setChapters(chapterList)
     const sourceId = roles.find((role) => role.role === 'RENDER_SOURCE')?.audioVersionId
     setSource(versions.find((version) => version.id === sourceId) ?? null)
     setLoaded(true)
@@ -747,7 +748,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
       {retake && <RetakeDialog sessionId={sessionId} target={retake} onClose={() => setRetake(null)} onSaved={async () => {
         setRendered((previous) => previous ? { ...previous, stale: true } : null)
         clearWordSelection()
-        try { await loadAll(); onDataChange() } catch { setError('重录已保存，请刷新数据查看最新剪辑。') }
+        try { await loadAll(`应用重录 ${tc(retake.startMs)}–${tc(retake.endMs)}`); onDataChange() } catch { setError('重录已保存，请刷新数据查看最新剪辑。') }
       }} />}
       {error && <div className="card" role="alert">{error} <button className="btn" disabled={busy} onClick={() => void perform(async () => { await loadAll() })}>刷新数据</button></div>}
       <div className="page-head review-head">
