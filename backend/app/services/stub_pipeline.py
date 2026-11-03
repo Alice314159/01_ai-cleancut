@@ -154,6 +154,13 @@ def _auto_start_transcription(session_id: str, source_version_id: str) -> None:
     task.add_done_callback(_auto_transcription_tasks.discard)
 
 
+def version_label(applied: list[str]) -> str:
+    names = {"declip": "去削波", "dereverb": "减轻混响", "denoise": "降噪"}
+    if not applied:
+        return "未降噪副本"
+    return " + ".join(names[step] for step in applied) + "版本"
+
+
 async def run_enhancement(job_id: str) -> None:
     db = db_module.SessionLocal()
     try:
@@ -168,7 +175,7 @@ async def run_enhancement(job_id: str) -> None:
         report = db.get(AudioQualityReport, session_id)
         # auto：质量报告检测到削波（>0.1% 采样贴满幅）才修；on：总是尝试，算法自己判断有没有削波
         want_declip = job.declip_mode == "on" or (job.declip_mode == "auto" and report is not None and report.clipping_ratio > 0.001)
-        chain = (["declip"] if want_declip else []) + ([] if job.mode == "off" else ["denoise"])
+        chain = (["declip"] if want_declip else []) + (["dereverb"] if job.dereverb else []) + ([] if job.mode == "off" else ["denoise"])
         job.requested_chain = chain
         db.commit()
         await manager.send_json(session_id, {"type": "enhancement_progress", "jobId": job_id, "progress": 0.1})
@@ -184,6 +191,12 @@ async def run_enhancement(job_id: str) -> None:
                 if repaired.regions:
                     samples = repaired.samples
                     applied.append("declip")
+            if job.dereverb:
+                reduced = await asyncio.to_thread(audio_analysis.dereverb, samples)
+                samples = reduced.samples
+                job.dereverb_t60_s = None if reduced.t60_s is None else round(reduced.t60_s, 2)
+                job.dereverb_reduction_db = reduced.reduction_db
+                applied.append("dereverb")
             if job.mode != "off":
                 applied.append("denoise")
             job.progress = 0.35
@@ -260,12 +273,13 @@ async def run_enhancement(job_id: str) -> None:
         denoised = AudioVersion(
             session_id=session_id,
             version_type="denoised",
-            label=("去削波版本" if applied == ["declip"] else "未降噪副本") if job.mode == "off" else ("去削波 + 降噪版本" if "declip" in applied else "降噪版本"),
+            label=version_label(applied),
             duration_ms=int(len(denoised_samples) / audio_analysis.ANALYSIS_SAMPLE_RATE * 1000),
             sample_count=len(denoised_samples),
             sample_rate=audio_analysis.ANALYSIS_SAMPLE_RATE,
             latency_ms=0,
-            engine="+".join(["declip_poly3"] * ("declip" in applied) + ["spectral_subtraction"] * (job.mode != "off")) or "pcm_passthrough",
+            engine="+".join(["declip_poly3"] * ("declip" in applied) + ["late_reverb_suppression"] * ("dereverb" in applied)
+                            + ["spectral_subtraction"] * (job.mode != "off")) or "pcm_passthrough",
             engine_version="1.0",
             determinism="deterministic",
             processing_locality="local",

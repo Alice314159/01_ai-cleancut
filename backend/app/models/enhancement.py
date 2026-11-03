@@ -30,6 +30,10 @@ class EnhancementJob(Base):
     # 去削波：auto=检测到削波才做，on=总是尝试，off=不做；declipped_regions 为实际修复的段数
     declip_mode: Mapped[str] = mapped_column(String, default="auto")
     declipped_regions: Mapped[int] = mapped_column(Integer, default=0)
+    # 减轻混响（可选，默认关）：估计的混响时间与平均压低量
+    dereverb: Mapped[bool] = mapped_column(Boolean, default=False)
+    dereverb_t60_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dereverb_reduction_db: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     result_version_id: Mapped[str | None] = mapped_column(String, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)

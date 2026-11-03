@@ -30,6 +30,9 @@ class EnhancementJobOut(CamelModel):
     actual_chain: list[str]
     declip_mode: str = "off"
     declipped_regions: int = 0
+    dereverb: bool = False
+    dereverb_t60_s: float | None = None
+    dereverb_reduction_db: float | None = None
     warnings: list[WarningOut] = []
 
 
@@ -37,3 +40,5 @@ class CreateEnhancementIn(BaseModel):
     mode: Literal["auto", "conservative", "aggressive", "off", "light", "balanced", "strong", "custom"] = "auto"
     # 去削波：auto 检测到削波才修复；on 总是尝试（无削波时不改动）；off 不做
     declip: Literal["auto", "on", "off"] = "auto"
+    # 减轻混响：只能减轻、去不干净，默认关闭
+    dereverb: bool = False

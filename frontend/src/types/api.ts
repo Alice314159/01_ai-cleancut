@@ -196,6 +196,11 @@ export interface EnhancementJob {
   declipMode?: string
   /** 实际修复的削波段数 */
   declippedRegions?: number
+  dereverb?: boolean
+  /** 估计的混响时间（秒）；估不出来为 null */
+  dereverbT60S?: number | null
+  /** 混响抑制的平均压低量（dB） */
+  dereverbReductionDb?: number | null
   warnings: Warning[]
 }
 

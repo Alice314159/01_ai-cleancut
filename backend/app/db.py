@@ -63,6 +63,12 @@ def init_db() -> None:
             connection.execute(text("ALTER TABLE enhancement_jobs ADD COLUMN declip_mode VARCHAR NOT NULL DEFAULT 'off'"))
         if "declipped_regions" not in columns:
             connection.execute(text("ALTER TABLE enhancement_jobs ADD COLUMN declipped_regions INTEGER NOT NULL DEFAULT 0"))
+        if "dereverb" not in columns:
+            connection.execute(text("ALTER TABLE enhancement_jobs ADD COLUMN dereverb BOOLEAN NOT NULL DEFAULT 0"))
+        if "dereverb_t60_s" not in columns:
+            connection.execute(text("ALTER TABLE enhancement_jobs ADD COLUMN dereverb_t60_s FLOAT"))
+        if "dereverb_reduction_db" not in columns:
+            connection.execute(text("ALTER TABLE enhancement_jobs ADD COLUMN dereverb_reduction_db FLOAT"))
 
     columns = {column["name"] for column in inspect(engine).get_columns("recording_sessions")}
     if "created_at_ns" not in columns:

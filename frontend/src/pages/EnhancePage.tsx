@@ -3,10 +3,10 @@ import { Card, Chip, KV } from '../components/Bits'
 import { WarningList } from '../components/WarningList'
 import { CONTENT_TYPE_LABEL, GRADE_LABEL, db } from '../lib/format'
 import { api } from '../lib/api'
-import { oneOf, usePref } from '../lib/prefs'
+import { isBoolean, oneOf, usePref } from '../lib/prefs'
 import type { AudioQualityReport, AudioVersion, EnhancementJob, RoleAssignment } from '../types/api'
 
-const CHAIN_LABEL: Record<string, string> = { declip: '去削波', denoise: '降噪' }
+const CHAIN_LABEL: Record<string, string> = { declip: '去削波', dereverb: '减轻混响', denoise: '降噪' }
 
 const MODES: { key: 'auto' | 'conservative' | 'aggressive'; label: string; note: string }[] = [
   { key: 'conservative', label: '轻度', note: '保守，优先自然度' },
@@ -31,6 +31,7 @@ export function EnhancePage({
   const [job, setJob] = useState<EnhancementJob | null>(null)
   const [mode, setMode] = useState<'auto' | 'conservative' | 'aggressive'>('auto')
   const [declip, setDeclip] = usePref<'auto' | 'on' | 'off'>('declip', 'auto', oneOf('auto', 'on', 'off'))
+  const [dereverb, setDereverb] = usePref('dereverb', false, isBoolean)
   const [triggering, setTriggering] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [qualityPending, setQualityPending] = useState(true)
@@ -103,7 +104,7 @@ export function EnhancePage({
     setTriggering(true)
     setError(null)
     try {
-      const created = await api.triggerEnhancement(sessionId, mode, declip)
+      const created = await api.triggerEnhancement(sessionId, mode, declip, dereverb)
       setJob(created)
     } catch (e) {
       setError(e instanceof Error ? e.message : '无法启动增强')
@@ -203,6 +204,12 @@ export function EnhancePage({
               <option value="off">不修复</option>
             </select>
           </label>
+          <label className="inline-field declip-field">
+            <input type="checkbox" checked={dereverb} disabled={triggering || !!jobRunning} onChange={(event) => setDereverb(event.target.checked)} />
+            减轻混响（空旷房间的回声感）
+          </label>
+          {dereverb && <p className="card__hint">只能减轻、去不干净；处理过度会让声音发闷或有轻微“水声”，请对比试听。</p>}
+          {!dereverb && quality?.noiseTypes.includes('reverb') && <p className="card__hint declip-hint">检测到可能的混响，可勾选“减轻混响”试试。</p>}
           {quality && quality.clippingRatio > 0.001 && (
             <p className="card__hint declip-hint">检测到 {(quality.clippingRatio * 100).toFixed(2)}% 的采样被削平（破音）。修复会根据两侧波形重建被削掉的峰，严重失真的长段无法还原。</p>
           )}
@@ -213,6 +220,7 @@ export function EnhancePage({
             <strong>{statusLabels[job.status] ?? job.status}</strong>
             {jobRunning && <progress aria-label="增强进度" max={1} value={job.progress} />}
             {!jobRunning && job.enhancementSuccess !== null && <span>{job.enhancementSuccess ? `${job.actualChain.includes('denoise') ? `噪声下降 ${db(job.noiseReductionDb)} dB · ` : ''}人声保护通过` : failed.length ? '人声保护未通过，输出保留此前版本。请试听核对。' : '未生成可用增强结果，原音频保留。'}</span>}
+            {!jobRunning && job.actualChain.includes('dereverb') && <span>{job.dereverbT60S != null ? `估计混响时间 ${job.dereverbT60S.toFixed(2)} 秒，` : '混响时间估计不出，按 0.5 秒处理，'}混响部分平均压低约 {(job.dereverbReductionDb ?? 0).toFixed(1)} dB</span>}
             {!jobRunning && job.requestedChain.includes('declip') && <span>{job.declippedRegions ? `已修复 ${job.declippedRegions} 处破音` : '未发现需要修复的破音'}</span>}
           </div>}
           <div className="enhance-continue">

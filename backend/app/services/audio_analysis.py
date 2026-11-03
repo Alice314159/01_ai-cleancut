@@ -542,7 +542,9 @@ def analyze_samples(samples: np.ndarray, sample_rate: int = ANALYSIS_SAMPLE_RATE
         noise_types.append("hum")
     if clipping_ratio > 0.001:
         noise_types.append("clipping")
-    if reverb > 0.65:
+    # 混响按衰减段估计的混响时间判断（≥0.6 秒算明显混响）；只看前 60 秒控制耗时
+    t60 = estimate_t60(samples[: sample_rate * 60], sample_rate)
+    if t60 is not None and t60 >= 0.6:
         noise_types.append("reverb")
 
     if clipping_ratio > 0.01 or snr_db < 6:
@@ -780,3 +782,76 @@ def classify_content(samples: np.ndarray, sample_rate: int = ANALYSIS_SAMPLE_RAT
     if f["flatness"] >= 0.6 and f["stationarity"] < 0.2:
         return ContentEstimate("no_speech", 0.7, rounded)
     return ContentEstimate("unknown", 0.0, rounded)
+
+
+# ─────────────── 减轻混响（晚期混响谱抑制） ───────────────
+
+@dataclass
+class DereverbResult:
+    samples: np.ndarray
+    t60_s: float | None      # 估计的混响时间；估不出来时为 None（此时用默认值处理）
+    reduction_db: float      # 平均压低量（只统计被处理的部分）
+
+
+def estimate_t60(samples: np.ndarray, sample_rate: int = ANALYSIS_SAMPLE_RATE) -> float | None:
+    """
+    从“声音停下后的自由衰减”估计混响时间：在 10ms 电平曲线上找从局部峰值开始、
+    持续下降至少 120ms 的段，拟合直线斜率（dB/s），取较陡的一半的中位数（较缓的多半混着下一个音），
+    T60 = 60 / 衰减速度。可用衰减段太少时返回 None。
+    """
+    hop = sample_rate // 100
+    n = len(samples) // hop
+    if n < 50:
+        return None
+    raw = 20 * np.log10(np.sqrt((samples[:n * hop].astype(np.float64).reshape(n, hop) ** 2).mean(1)) + 1e-7)
+    # 混响尾巴像噪声一样毛糙，先做 50ms 滑动平均再找衰减段
+    level = np.convolve(raw, np.ones(5) / 5, mode="same")
+    floor = float(np.percentile(level, 5))
+    top = float(np.percentile(level, 99))
+    slopes = []
+    i = 1
+    while i < n - 12:
+        if level[i] >= level[i - 1] and level[i] > level[i + 1] and level[i] > max(floor + 15, top - 25):
+            j = i
+            while j + 1 < n and level[j + 1] <= level[j] + 1.0 and level[j + 1] > floor + 3:
+                j += 1
+            if j - i >= 10 and level[i] - level[j] >= 10:  # ≥100ms 且至少衰减 10 dB
+                t = np.arange(j - i + 1) / 100
+                slope = np.polyfit(t, level[i:j + 1], 1)[0]
+                if slope < -5:
+                    slopes.append(-slope)
+            i = max(j, i + 1)
+        else:
+            i += 1
+    if len(slopes) < 3:
+        return None
+    steep = np.sort(slopes)[len(slopes) // 2:]
+    return float(np.clip(60 / np.median(steep), 0.15, 2.0))
+
+
+def dereverb(samples: np.ndarray, sample_rate: int = ANALYSIS_SAMPLE_RATE, *, t60_s: float | None = None,
+             max_suppression_db: float = 12.0, delay_ms: float = 50.0) -> DereverbResult:
+    """
+    晚期混响谱抑制（Lebart 等人的统计模型）：混响能量按 exp(-6.9·t/T60) 衰减，
+    所以“当前帧的晚期混响”≈ 延迟 delay_ms 前那一帧的能量 × 衰减系数。
+    增益 = 1 − 估计混响/当前能量，限制在 −max_suppression_db 以上并做时间平滑，避免“水声”伪影。
+    只能减轻，不能去干净；早期反射（50ms 内）不处理。
+    """
+    x = np.asarray(samples, dtype=np.float32)
+    estimated = estimate_t60(x, sample_rate) if t60_s is None else t60_s
+    t60 = estimated or 0.5
+    frame, hop = 512, 128
+    spectrum, window = _stft(x, frame, hop)
+    power = np.abs(spectrum) ** 2
+    delay = max(1, round(delay_ms / 1000 * sample_rate / hop))
+    decay = np.exp(-2 * (3 * np.log(10) / t60) * delay * hop / sample_rate)
+    late = np.zeros_like(power)
+    late[delay:] = decay * power[:-delay]
+    gain = np.maximum(1 - late / (power + 1e-12), 10 ** (-max_suppression_db / 20))
+    # 时间方向一阶平滑：增益突变会产生音乐噪声
+    for t in range(1, len(gain)):
+        gain[t] = 0.6 * gain[t] + 0.4 * gain[t - 1]
+    out = _istft(spectrum * gain, window, hop, len(x))
+    loud = power > np.percentile(power, 50)
+    reduction = float(-20 * np.log10(np.mean(gain[loud]) + 1e-9)) if loud.any() else 0.0
+    return DereverbResult(out, estimated, round(reduction, 1))
