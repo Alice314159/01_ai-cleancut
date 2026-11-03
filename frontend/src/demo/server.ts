@@ -164,6 +164,7 @@ function listItem(s: DemoSession) {
 
 async function handle(method: string, path: string, query: URLSearchParams, body: Json, form?: FormData): Promise<Response> {
   if (path === '/api/health') return json(200, { status: 'ok' })
+  if (path === '/api/capabilities') return json(200, { transcription: false, liveHints: false })
   if (path === '/api/sessions' && method === 'GET') {
     return json(200, [...sessions.values()].sort((a, b) => String(b.detail.createdAt).localeCompare(String(a.detail.createdAt))).map(listItem))
   }

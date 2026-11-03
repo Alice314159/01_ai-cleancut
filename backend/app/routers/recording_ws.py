@@ -5,7 +5,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app import db as db_module
 from app.models import RecordingSession
-from app.services import storage
+from app.services import live_hints, storage
 from app.services.stub_pipeline import schedule_capture_stop, simulate_capture_signals
 from app.ws.connection_manager import manager
 
@@ -183,6 +183,11 @@ async def _handle_control(db, session_id: str, payload: dict) -> None:
         task = asyncio.create_task(simulate_capture_signals(session_id, stop_event))
         _signal_tasks.add(task)
         task.add_done_callback(_signal_tasks.discard)
+        if isinstance(settings, dict) and settings.get("liveHints") is True:
+            hint_task = asyncio.create_task(live_hints.run_live_hints(
+                session_id, stop_event, lambda payload: manager.send_json(session_id, payload)))
+            _signal_tasks.add(hint_task)
+            hint_task.add_done_callback(_signal_tasks.discard)
     elif action == "reconnect":
         if session_id not in _resumable or session.capture_status not in ACTIVE_CAPTURE:
             await manager.send_json(session_id, {"type": "error", "code": "not_resumable", "status": session.capture_status})

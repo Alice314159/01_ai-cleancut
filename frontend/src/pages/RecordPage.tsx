@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, Chip, KV, Stat } from '../components/Bits'
 import { GuardBanner } from '../components/GuardBanner'
 import { LevelMeter } from '../components/LevelMeter'
@@ -6,7 +6,8 @@ import { WaveformRibbon } from '../components/WaveformRibbon'
 import { envelope as mockEnvelope } from '../mock/data'
 import { dur, tc } from '../lib/format'
 import { useRecordingSocket } from '../lib/useRecordingSocket'
-import type { SessionDetail } from '../lib/api'
+import { api, type SessionDetail } from '../lib/api'
+import { isBoolean, usePref } from '../lib/prefs'
 
 const FALLBACK_WAVE = mockEnvelope(190)
 
@@ -39,6 +40,8 @@ export function RecordPage({
     committedDurationMs,
     liveEnvelope,
     qualityEvents,
+    liveHints,
+    liveHintNotice,
     stage,
     start,
     pause,
@@ -49,6 +52,15 @@ export function RecordPage({
   useEffect(() => {
     if (stage?.stage === 'capture' || stage?.stage === 'finalized') onSessionChange()
   }, [stage, onSessionChange])
+
+  // 录制中实时提示：依赖电脑上的本机转写，未安装时开关不可用
+  const [liveHintsOn, setLiveHintsOn] = usePref('liveHints', false, isBoolean)
+  const [hintsAvailable, setHintsAvailable] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    api.capabilities().then((c) => { if (!cancelled) setHintsAvailable(c.liveHints) }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [])
 
   const warning = qualityEvents.find((e) => e.severity === 'warning')
   const notices = qualityEvents.filter((e) => e.severity === 'notice')
@@ -144,7 +156,7 @@ export function RecordPage({
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {captureState === 'IDLE' && (
-              <button className="btn btn--primary" onClick={start}>
+              <button className="btn btn--primary" onClick={() => void start({ liveHints: liveHintsOn && hintsAvailable })}>
                 开始录制
               </button>
             )}
@@ -178,6 +190,24 @@ export function RecordPage({
           <p className="card__hint" style={{ marginTop: 'var(--sp-3)', marginBottom: 0 }}>
             停止后会完成最后一片上传并分析录音。网络中断时录音在本机继续并自动重连补传；页面被关闭时，重新打开此会话会补传未上传的部分。
           </p>
+          {captureState === 'IDLE' && (
+            <label className="live-hint-toggle" title={hintsAvailable ? '每 15 秒用较小的模型转写刚录下的部分，较耗电脑 CPU' : '电脑上未安装本机转写（faster-whisper），无法实时提示'}>
+              <input type="checkbox" checked={liveHintsOn && hintsAvailable} disabled={!hintsAvailable} onChange={(event) => setLiveHintsOn(event.target.checked)} />
+              录制时实时提示重复 / 口吃 / 语气词{hintsAvailable ? '（较耗电脑 CPU）' : '（需电脑安装本机转写）'}
+            </label>
+          )}
+          {(liveHints.length > 0 || liveHintNotice) && (
+            <div className="live-hints" role="log" aria-live="polite" aria-label="实时提示">
+              <div className="live-hints__head">实时提示 · 仅供参考，录完后会根据完整转写生成剪辑建议</div>
+              {liveHintNotice && <p className="card__hint">{liveHintNotice}</p>}
+              {[...liveHints].reverse().slice(0, 6).map((hint) => (
+                <div key={`${hint.kind}-${hint.startMs}`} className={`live-hint live-hint--${hint.kind}`}>
+                  <span className="mono">约 {tc(hint.startMs).slice(0, 5)}</span>
+                  <span>{hint.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
 
         <Card title="输入设备" hint="开始录制后读取浏览器报告的设备设置；未提供的处理状态显示为未知。">

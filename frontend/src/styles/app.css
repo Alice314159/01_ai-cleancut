@@ -1817,3 +1817,11 @@ select:disabled { opacity: .55; cursor: not-allowed; }
 .app-switch { align-self: center; flex-shrink: 0; margin-right: 8px; padding: 2px 10px; border-radius: 999px; font-size: var(--step--1); color: var(--text-dim); border: 1px solid var(--hairline); }
 .app-setup__hint { font-size: var(--step--1); }
 .app-setup__hint code { color: var(--text); background: var(--surface-2); padding: 1px 6px; border-radius: 5px; }
+
+/* 录制中实时提示 */
+.live-hint-toggle { display: flex; gap: 8px; align-items: center; margin-top: var(--sp-3); font-size: var(--step--1); color: var(--text-dim); }
+.live-hints { margin-top: var(--sp-3); padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); display: grid; gap: 6px; }
+.live-hints__head { font-size: var(--step--1); color: var(--text-faint); }
+.live-hint { display: flex; gap: 10px; align-items: baseline; font-size: var(--step--1); }
+.live-hint .mono { color: var(--accent); font-variant-numeric: tabular-nums; }
+.live-hint--repetition, .live-hint--stutter { color: var(--sig-provisional); }

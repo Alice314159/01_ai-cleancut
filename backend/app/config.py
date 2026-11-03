@@ -26,3 +26,6 @@ AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 ASR_MODEL = os.environ.get("CLEANCUT_ASR_MODEL", "base")
 ASR_MODEL_DIR = Path(os.environ.get("CLEANCUT_ASR_MODEL_DIR", str(DATA_DIR / "models")))
 ASR_LOCAL_FILES_ONLY = os.environ.get("CLEANCUT_ASR_OFFLINE", "0") == "1"
+
+# 录制中实时提示（可选）：用较小的模型每隔一段时间转写最近一段，提示重复/口吃/语气词
+LIVE_HINT_MODEL = os.environ.get("CLEANCUT_LIVE_HINT_MODEL", "tiny")

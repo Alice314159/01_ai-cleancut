@@ -299,6 +299,10 @@ export const api = {
   coverUrl(id: string, version: string) {
     return demoCoverUrl(id) ?? `${API_BASE}/api/sessions/${id}/cover?v=${encodeURIComponent(version)}`
   },
+  /** 后端可选能力（是否安装了本机转写等），决定前端是否提供相关开关 */
+  capabilities() {
+    return request<{ transcription: boolean; liveHints: boolean }>('/api/capabilities')
+  },
   listChapters(id: string) {
     return request<Chapter[]>(`/api/sessions/${id}/chapters`)
   },

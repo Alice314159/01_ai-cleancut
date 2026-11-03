@@ -7,6 +7,7 @@ import type { QualityEvent } from '../types/api'
 
 export type CaptureState = 'IDLE' | 'RECORDING' | 'PAUSED' | 'RECONNECTING' | 'STOPPED'
 type StageMsg = { type: 'stage'; stage: string; status: string }
+export type LiveHint = { kind: 'repetition' | 'stutter' | 'filler'; text: string; startMs: number; endMs: number; message: string }
 type QualityEventMsg = { type: 'quality_event' } & Pick<QualityEvent, 'id' | 'eventType' | 'severity' | 'clientTimestampMs' | 'message'>
 
 /** MediaRecorder 每 1 秒产出一片，待上传片数约等于未上传的秒数。 */
@@ -39,6 +40,8 @@ export function useRecordingSocket(sessionId: string | null) {
   const [liveEnvelope, setLiveEnvelope] = useState<number[]>([])
   const [qualityEvents, setQualityEvents] = useState<QualityEventMsg[]>([])
   const [stage, setStage] = useState<StageMsg | null>(null)
+  const [liveHints, setLiveHints] = useState<LiveHint[]>([])
+  const [liveHintNotice, setLiveHintNotice] = useState<string | null>(null)
 
   const wsRef = useRef<WebSocket | null>(null)
   const queueRef = useRef(new ChunkQueue())
@@ -145,6 +148,8 @@ export function useRecordingSocket(sessionId: string | null) {
             setLiveEnvelope((prev) => [...prev, Math.max(0.06, Math.min(1, msg.peak))])
             break
           case 'quality_event': setQualityEvents((prev) => [...prev, msg]); break
+          case 'live_hint': setLiveHints((prev) => [...prev, msg]); break
+          case 'live_hints_unavailable': setLiveHintNotice(msg.message); break
           case 'stage': setStage(msg); break
           case 'error':
             if (msg.code === 'not_resumable') { ws.close(); break }
@@ -224,7 +229,7 @@ export function useRecordingSocket(sessionId: string | null) {
   const finishRef = useRef(finish)
   finishRef.current = finish
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (options?: { liveHints?: boolean }) => {
     if (startingRef.current || recorderRef.current || stoppingRef.current || !sessionId) return
     startingRef.current = true
     const generation = generationRef.current
@@ -246,7 +251,7 @@ export function useRecordingSocket(sessionId: string | null) {
       attemptRef.current = 0
       wantedStateRef.current = 'RECORDING'
       void chunkStore.clear(sessionId)
-      setLiveEnvelope([]); setQualityEvents([]); syncPending()
+      setLiveEnvelope([]); setQualityEvents([]); setLiveHints([]); setLiveHintNotice(null); syncPending()
       recorder.ondataavailable = (event) => {
         if (!event.data.size) return
         // 串行转换，保证分片顺序与媒体容器一致
@@ -261,7 +266,7 @@ export function useRecordingSocket(sessionId: string | null) {
       }
       recorder.onerror = () => { setConnError('音频采集失败，正在保存已录内容'); void finishRef.current() }
       const settings = stream.getAudioTracks()[0].getSettings()
-      ws.send(JSON.stringify({ type: 'control', action: 'start', settings: { ...settings, mimeType: recorder.mimeType, resumable: true } }))
+      ws.send(JSON.stringify({ type: 'control', action: 'start', settings: { ...settings, mimeType: recorder.mimeType, resumable: true, liveHints: !!options?.liveHints } }))
       resumableRef.current = true
       activeMsRef.current = 0
       runningSinceRef.current = null
@@ -345,7 +350,7 @@ export function useRecordingSocket(sessionId: string | null) {
 
   return {
     captureState, connError, notice, pendingSeconds: Math.round(pendingChunks * TIMESLICE_MS / 1000),
-    rmsDbfs, peakDbfs, committedDurationMs, liveEnvelope, qualityEvents, stage, start,
+    rmsDbfs, peakDbfs, committedDurationMs, liveEnvelope, qualityEvents, liveHints, liveHintNotice, stage, start,
     pause: () => control('pause'), resume: () => control('resume'), stop: finish,
   }
 }

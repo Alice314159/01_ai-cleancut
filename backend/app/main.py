@@ -46,3 +46,10 @@ app.include_router(chapters.router)
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/capabilities")
+def capabilities():
+    """前端据此决定是否提供依赖本机转写的功能（如录制中实时提示）。"""
+    from app.services import live_hints, transcription
+    return {"transcription": transcription.dependency_available(), "liveHints": live_hints.available()}
