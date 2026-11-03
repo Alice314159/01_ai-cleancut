@@ -66,6 +66,9 @@ def init_db() -> None:
     if "cover_filename" not in columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE recording_sessions ADD COLUMN cover_filename VARCHAR"))
+    if "received_chunks" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE recording_sessions ADD COLUMN received_chunks INTEGER NOT NULL DEFAULT 0"))
 
     columns = {column["name"] for column in inspect(engine).get_columns("transcript_tokens")}
     with engine.begin() as connection:

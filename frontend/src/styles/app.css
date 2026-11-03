@@ -1794,3 +1794,7 @@ select:disabled { opacity: .55; cursor: not-allowed; }
 .render-chapters li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
 .render-chapters .mono { color: var(--accent); font-variant-numeric: tabular-nums; }
 .render-chapters__note { color: var(--sig-provisional); }
+
+/* 录音上传状态（断线续传） */
+.upload-status { margin-bottom: var(--sp-4); border-color: var(--sig-provisional); display: grid; gap: 4px; }
+.upload-status p { margin: 0; }

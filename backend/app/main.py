@@ -18,6 +18,8 @@ async def lifespan(app: FastAPI):
     from app.services.stub_pipeline import recover_interrupted_enhancements, recover_interrupted_finalizations
     recover_interrupted_enhancements()
     recover_interrupted_finalizations()
+    from app.routers.recording_ws import recover_reconnecting_sessions
+    recover_reconnecting_sessions()
     yield
 
 

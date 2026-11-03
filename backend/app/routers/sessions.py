@@ -119,7 +119,7 @@ def delete_session(session_id: str, db: Session = Depends(get_db)):
     if session is None:
         db.rollback()
         raise HTTPException(status_code=404, detail="session not found")
-    if session.capture_status in ("RECORDING", "PAUSED", "IMPORTING"):
+    if session.capture_status in ("RECORDING", "PAUSED", "RECONNECTING", "IMPORTING"):
         db.rollback()
         raise HTTPException(status_code=409, detail="会话正在录制或导入中，请先停止/等待完成再删除")
     if session.live_analysis_status == "FINALIZING":

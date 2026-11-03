@@ -24,6 +24,8 @@ export function RecordPage({
   const {
     captureState,
     connError,
+    notice,
+    pendingSeconds,
     rmsDbfs,
     peakDbfs,
     committedDurationMs,
@@ -55,6 +57,8 @@ export function RecordPage({
         return { text: '● 录制中', tone: 'provisional' as const }
       case 'PAUSED':
         return { text: '已暂停', tone: undefined }
+      case 'RECONNECTING':
+        return { text: '网络重连中', tone: 'danger' as const }
       case 'STOPPED':
         return { text: '已停止', tone: 'committed' as const }
       default:
@@ -77,6 +81,12 @@ export function RecordPage({
         </div>
       </div>
 
+      {(notice || (pendingSeconds > 0 && captureState !== 'STOPPED')) && (
+        <div className="card upload-status" role="status">
+          {notice && <p>{notice}</p>}
+          {pendingSeconds > 0 && <p className="card__hint">待上传约 {pendingSeconds} 秒（已保存在本机，不会丢失）</p>}
+        </div>
+      )}
       {(captureState === 'STOPPED' || session?.captureStatus === 'STOPPED') && (
         <Card title="录音已结束" hint="下一步转写文字、选择需要删除的内容，再试听导出。降噪可按需使用。">
           <button className="btn btn--primary" onClick={onContinue}>下一步：转写与剪辑</button>
@@ -150,10 +160,15 @@ export function RecordPage({
                 </button>
               </>
             )}
+            {captureState === 'RECONNECTING' && (
+              <button className="btn" onClick={handleStop} title="会先尝试补传本机缓存的录音">
+                停止（网络恢复后补传）
+              </button>
+            )}
             {captureState === 'STOPPED' && <Chip tone="committed">已停止，可前往「复核」页</Chip>}
           </div>
           <p className="card__hint" style={{ marginTop: 'var(--sp-3)', marginBottom: 0 }}>
-            停止后会完成最后一片上传并分析录音，质量报告就绪后可在「增强」页触发降噪。
+            停止后会完成最后一片上传并分析录音。网络中断时录音在本机继续并自动重连补传；页面被关闭时，重新打开此会话会补传未上传的部分。
           </p>
         </Card>
 

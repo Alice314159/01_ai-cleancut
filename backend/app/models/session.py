@@ -70,3 +70,6 @@ class RecordingSession(Base):
 
     # 节目封面（会话目录下的文件名，名字带时间戳，换封面即换文件名，导出缓存与浏览器缓存随之失效）
     cover_filename: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # 断线续传：已按顺序写入的录音分片数（下一个期望的分片序号）
+    received_chunks: Mapped[int] = mapped_column(Integer, default=0)

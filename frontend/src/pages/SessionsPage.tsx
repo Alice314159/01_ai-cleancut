@@ -25,7 +25,8 @@ const CAPTURE_LABEL: Record<string, string> = { IDLE: '未开始', RECORDING: '�
 
 /** 音频就绪后直接继续剪辑，增强是可选步骤。 */
 function routeForRow(row: SessionListItem): RouteKey {
-  if (row.captureMode !== 'batch' && ['IDLE', 'RECORDING', 'PAUSED'].includes(row.captureStatus)) return 'record'
+  // 重新连接中的会话也回到录制页：那里会把本机缓存的未上传录音补传上去
+  if (row.captureMode !== 'batch' && ['IDLE', 'RECORDING', 'PAUSED', 'RECONNECTING'].includes(row.captureStatus)) return 'record'
   if (row.liveAnalysisStatus === 'FINALIZED') return 'review'
   return 'enhance'
 }
