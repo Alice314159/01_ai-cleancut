@@ -8,8 +8,9 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // CI 中按 GitHub Actions 运行序号递增，新版 APK 可以直接覆盖安装旧版
-        versionCode (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
-        versionName "2.1." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        // 显式括号：Groovy 会把 `versionCode (表达式).toInteger()` 解析成先调用 versionCode(字符串)
+        versionCode(Integer.parseInt(System.getenv("GITHUB_RUN_NUMBER") ?: "1"))
+        versionName("2.1." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0"))
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
