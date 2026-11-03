@@ -43,7 +43,7 @@ async def trigger_enhancement(session_id: str, body: CreateEnhancementIn, db: Se
     mode_map = {"auto": "balanced", "conservative": "light", "aggressive": "strong"}
     resolved_mode = mode_map.get(body.mode, body.mode)
 
-    job = EnhancementJob(session_id=session_id, mode=resolved_mode, status="QUEUED", progress=0.0)
+    job = EnhancementJob(session_id=session_id, mode=resolved_mode, status="QUEUED", progress=0.0, declip_mode=body.declip)
     db.add(job)
     session.processing_status = "QUEUED"
     db.commit()

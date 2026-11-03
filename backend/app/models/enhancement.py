@@ -27,6 +27,9 @@ class EnhancementJob(Base):
     # 前端类型是 string[]（处理步骤名列表）；当前只会出现 [] 或 ["denoise"]
     requested_chain: Mapped[list] = mapped_column(JSON, default=list)
     actual_chain: Mapped[list] = mapped_column(JSON, default=list)
+    # 去削波：auto=检测到削波才做，on=总是尝试，off=不做；declipped_regions 为实际修复的段数
+    declip_mode: Mapped[str] = mapped_column(String, default="auto")
+    declipped_regions: Mapped[int] = mapped_column(Integer, default=0)
 
     result_version_id: Mapped[str | None] = mapped_column(String, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)

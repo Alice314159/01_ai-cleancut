@@ -1798,3 +1798,5 @@ select:disabled { opacity: .55; cursor: not-allowed; }
 /* 录音上传状态（断线续传） */
 .upload-status { margin-bottom: var(--sp-4); border-color: var(--sig-provisional); display: grid; gap: 4px; }
 .upload-status p { margin: 0; }
+.declip-field { margin: 10px 0 4px; flex-wrap: wrap; }
+.declip-hint { margin: 4px 0 10px; color: var(--sig-provisional); }

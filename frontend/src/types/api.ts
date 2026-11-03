@@ -190,6 +190,10 @@ export interface EnhancementJob {
   voiceProtection: VoiceProtectionMetric[]
   requestedChain: string[]
   actualChain: string[]
+  /** auto | on | off */
+  declipMode?: string
+  /** 实际修复的削波段数 */
+  declippedRegions?: number
   warnings: Warning[]
 }
 

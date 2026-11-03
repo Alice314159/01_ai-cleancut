@@ -195,10 +195,10 @@ export const api = {
   getWarnings(id: string) {
     return request<Warning[]>(`/api/sessions/${id}/warnings`)
   },
-  triggerEnhancement(id: string, mode: DenoiseMode | 'auto' | 'conservative' | 'aggressive') {
+  triggerEnhancement(id: string, mode: DenoiseMode | 'auto' | 'conservative' | 'aggressive', declip: 'auto' | 'on' | 'off' = 'auto') {
     return request<EnhancementJob>(`/api/sessions/${id}/enhancement`, {
       method: 'POST',
-      body: JSON.stringify({ mode }),
+      body: JSON.stringify({ mode, declip }),
     })
   },
   getEnhancement(id: string, jobId: string) {

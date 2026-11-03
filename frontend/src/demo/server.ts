@@ -231,7 +231,9 @@ async function handle(method: string, path: string, query: URLSearchParams, body
     for (const role of session.roles) if (role.role !== 'TIMEBASE') { role.upgradedFrom = role.audioVersionId; role.audioVersionId = id }
     session.detail.processingStatus = 'DONE'
     session.enhancement = { id: uid('job'), mode: body.mode === 'auto' ? 'balanced' : body.mode, status: 'COMPLETED', progress: 1, resultVersionId: id, errorMessage: null,
-      enhancementSuccess: true, noiseReductionDb: 11.6, requestedChain: ['denoise'], actualChain: ['denoise'], warnings: [],
+      enhancementSuccess: true, noiseReductionDb: 11.6, warnings: [], declipMode: body.declip ?? 'auto', declippedRegions: 0,
+      // 演示音频没有削波：自动模式不修复，强制开启时也找不到可修复的破音
+      requestedChain: [...(body.declip === 'on' ? ['declip'] : []), 'denoise'], actualChain: ['denoise'],
       voiceProtection: [
         { key: 'speech_energy', label: '语音能量保留', value: 97.8, unit: '%', target: '≥ 95%', pass: true, hard: true },
         { key: 'spectral_centroid', label: '音色偏移', value: 2.1, unit: '%', target: '≤ 8%', pass: true },

@@ -533,7 +533,7 @@ def analyze_samples(samples: np.ndarray, sample_rate: int = ANALYSIS_SAMPLE_RATE
     speech_rms = float(np.mean(frame_rms[frame_rms > speech_threshold])) if speech_coverage > 0 else overall_rms
     snr_db = _dbfs(speech_rms) - _dbfs(max(noise_floor_rms, 1e-6))
 
-    clipping_ratio = float(np.mean(np.abs(samples) > 0.99)) if len(samples) else 0.0
+    clipping_ratio = clip_ratio(samples)
     hum = _hum_probability(samples, sample_rate)
     reverb = _reverb_proxy(samples, sample_rate)
 
@@ -593,3 +593,95 @@ def compute_envelope(path: Path, buckets: int = 200, sample_rate: int = ANALYSIS
     if len(out) < buckets:
         out += [0.0] * (buckets - len(out))
     return [round(float(v), 3) for v in out[:buckets]]
+
+
+# ─────────────── 去削波（破音修复） ───────────────
+
+@dataclass
+class DeclipResult:
+    samples: np.ndarray
+    regions: int          # 修复的削波段数
+    clipped_samples: int  # 被重建的采样点数
+    gain_db: float        # 为留出余量做的整体增益（≤ 0）
+
+
+def clip_ratio(samples: np.ndarray) -> float:
+    """
+    削波采样占比。贴满幅（>0.99）的一定算；另外削波常发生在满幅以下（设备限幅、编码后的
+    上限），所以样本在某个上限处明显堆积时，也把贴近该上限的采样计入。
+    """
+    if len(samples) == 0:
+        return 0.0
+    magnitude = np.abs(samples)
+    full_scale = float(np.mean(magnitude > 0.99))
+    if has_clipping_pileup(samples) and float(magnitude.max()) >= 0.3:
+        return max(full_scale, float(np.mean(magnitude >= 0.995 * magnitude.max())))
+    return full_scale
+
+
+def has_clipping_pileup(x: np.ndarray) -> bool:
+    """
+    削波的特征是大量采样堆在同一个上限：贴近最大幅度（最高 0.5%）的采样数，远多于
+    紧挨着的下一档（0.5%~1.5%，按宽度折算）。自然波峰只会短暂碰到最大值，不会堆积。
+    """
+    magnitude = np.abs(x)
+    peak = float(magnitude.max()) if len(magnitude) else 0.0
+    if peak <= 0:
+        return False
+    top = int(np.count_nonzero(magnitude >= 0.995 * peak))
+    below = int(np.count_nonzero((magnitude >= 0.985 * peak) & (magnitude < 0.995 * peak))) / 2
+    return top >= 20 and top > 3 * below
+
+
+def declip(samples: np.ndarray, *, clip_level: float | None = None, context: int = 8,
+           max_region: int = 400, headroom: float = 0.97) -> DeclipResult:
+    """
+    重建被削平的波峰：找出幅度贴着削波电平、连续同号的采样段，用段两侧未削波的
+    采样拟合三次多项式，在段内插值出原本的峰形（不低于削波电平、不超过其两倍）。
+    重建后峰值可能超过满幅，最后整体降一点增益留出余量。没有削波段时原样返回。
+
+    clip_level 缺省为信号最大幅度的 99.5%：浏览器/编码器削波不一定正好在 1.0。
+    """
+    x = np.asarray(samples, dtype=np.float64)
+    if len(x) == 0:
+        return DeclipResult(samples.astype(np.float32), 0, 0, 0.0)
+    peak = float(np.max(np.abs(x)))
+    level = clip_level if clip_level is not None else peak * 0.995
+    if peak < 0.3 or level <= 0:  # 太安静的录音不可能是削波
+        return DeclipResult(samples.astype(np.float32), 0, 0, 0.0)
+    if clip_level is None and not has_clipping_pileup(x):
+        return DeclipResult(samples.astype(np.float32), 0, 0, 0.0)
+    clipped = np.abs(x) >= level
+    # 找连续段，且段内同号（正负削波分开处理）
+    edges = np.diff(np.concatenate(([0], clipped.astype(np.int8), [0])))
+    starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
+    out = x.copy()
+    regions = 0
+    rebuilt = 0
+    for start, end in zip(starts, ends):
+        length = end - start
+        # 单个采样点碰到峰值不算削波（正常波峰也会触到最大值）；过长的段是大面积失真，插值不可信
+        if length < 2 or length > max_region:
+            continue
+        sign = np.sign(x[start])
+        if np.any(np.sign(x[start:end]) != sign):
+            continue
+        left = np.arange(max(0, start - context), start)
+        right = np.arange(end, min(len(x), end + context))
+        left = left[~clipped[left]]
+        right = right[~clipped[right]]
+        if len(left) < 2 or len(right) < 2:
+            continue
+        positions = np.concatenate((left, right)).astype(np.float64)
+        coefficients = np.polyfit(positions - start, x[positions.astype(int)], 3)
+        fitted = np.polyval(coefficients, np.arange(length, dtype=np.float64))
+        magnitude = np.clip(np.abs(fitted), level, 2.0 * level)
+        out[start:end] = sign * magnitude
+        regions += 1
+        rebuilt += int(length)
+    if regions == 0:
+        return DeclipResult(samples.astype(np.float32), 0, 0, 0.0)
+    new_peak = float(np.max(np.abs(out)))
+    gain = min(1.0, headroom / new_peak) if new_peak > 0 else 1.0
+    out *= gain
+    return DeclipResult(out.astype(np.float32), regions, rebuilt, round(20 * np.log10(gain), 2) if gain < 1 else 0.0)

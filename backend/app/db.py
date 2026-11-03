@@ -57,6 +57,12 @@ def init_db() -> None:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE enhancement_jobs ADD COLUMN created_at_ns BIGINT NOT NULL DEFAULT 0"))
             connection.execute(text("UPDATE enhancement_jobs SET created_at_ns = rowid"))
+    columns = {column["name"] for column in inspect(engine).get_columns("enhancement_jobs")}
+    with engine.begin() as connection:
+        if "declip_mode" not in columns:
+            connection.execute(text("ALTER TABLE enhancement_jobs ADD COLUMN declip_mode VARCHAR NOT NULL DEFAULT 'off'"))
+        if "declipped_regions" not in columns:
+            connection.execute(text("ALTER TABLE enhancement_jobs ADD COLUMN declipped_regions INTEGER NOT NULL DEFAULT 0"))
 
     columns = {column["name"] for column in inspect(engine).get_columns("recording_sessions")}
     if "created_at_ns" not in columns:

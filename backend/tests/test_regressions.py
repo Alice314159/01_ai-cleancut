@@ -26,7 +26,8 @@ from tests.test_pipeline import _create_session, _put_audio
 
 def new_job(factory, session_id, mode="balanced"):
     with factory() as db:
-        job = EnhancementJob(session_id=session_id, mode=mode)
+        # 这些用例只验证降噪/版本行为；去削波另见 test_declip.py
+        job = EnhancementJob(session_id=session_id, mode=mode, declip_mode="off")
         db.add(job)
         db.commit()
         return job.id

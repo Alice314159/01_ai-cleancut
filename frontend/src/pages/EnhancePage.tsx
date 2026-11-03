@@ -3,7 +3,10 @@ import { Card, Chip, KV } from '../components/Bits'
 import { WarningList } from '../components/WarningList'
 import { CONTENT_TYPE_LABEL, GRADE_LABEL, db } from '../lib/format'
 import { api } from '../lib/api'
+import { oneOf, usePref } from '../lib/prefs'
 import type { AudioQualityReport, AudioVersion, EnhancementJob, RoleAssignment } from '../types/api'
+
+const CHAIN_LABEL: Record<string, string> = { declip: '去削波', denoise: '降噪' }
 
 const MODES: { key: 'auto' | 'conservative' | 'aggressive'; label: string; note: string }[] = [
   { key: 'conservative', label: '轻度', note: '保守，优先自然度' },
@@ -27,6 +30,7 @@ export function EnhancePage({
   const [quality, setQuality] = useState<AudioQualityReport | null>(null)
   const [job, setJob] = useState<EnhancementJob | null>(null)
   const [mode, setMode] = useState<'auto' | 'conservative' | 'aggressive'>('auto')
+  const [declip, setDeclip] = usePref<'auto' | 'on' | 'off'>('declip', 'auto', oneOf('auto', 'on', 'off'))
   const [triggering, setTriggering] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [qualityPending, setQualityPending] = useState(true)
@@ -99,7 +103,7 @@ export function EnhancePage({
     setTriggering(true)
     setError(null)
     try {
-      const created = await api.triggerEnhancement(sessionId, mode)
+      const created = await api.triggerEnhancement(sessionId, mode, declip)
       setJob(created)
     } catch (e) {
       setError(e instanceof Error ? e.message : '无法启动增强')
@@ -183,18 +187,29 @@ export function EnhancePage({
           <p className="card__hint quality-footnote">以上为信号分析估算值，结合试听判断音质。</p>
         </Card>
 
-        <Card title="降噪强度" hint="选择强度，再对比原音与降噪结果。">
+        <Card title="音质增强" hint="可修复破音（削波）并降噪，处理后对比原音与结果。">
           <div className="denoise-modes" role="group" aria-label="降噪强度">
             {MODES.map((m) => <button key={m.key} aria-pressed={mode === m.key} disabled={triggering || !!jobRunning} onClick={() => setMode(m.key)}>{m.label}</button>)}
           </div>
           <p className="denoise-mode-note">{MODES.find((m) => m.key === mode)?.note}</p>
+          <label className="inline-field declip-field">修复破音（削波）
+            <select aria-label="修复破音" value={declip} disabled={triggering || !!jobRunning} onChange={(event) => setDeclip(event.target.value as 'auto' | 'on' | 'off')}>
+              <option value="auto">自动（检测到削波时修复）</option>
+              <option value="on">总是尝试</option>
+              <option value="off">不修复</option>
+            </select>
+          </label>
+          {quality && quality.clippingRatio > 0.001 && (
+            <p className="card__hint declip-hint">检测到 {(quality.clippingRatio * 100).toFixed(2)}% 的采样被削平（破音）。修复会根据两侧波形重建被削掉的峰，严重失真的长段无法还原。</p>
+          )}
           <button className="btn btn--primary denoise-start" onClick={handleTrigger} disabled={triggering || !!jobRunning}>
             {triggering ? '正在启动…' : jobRunning ? `处理中 ${Math.round((job?.progress ?? 0) * 100)}%` : '开始增强'}
           </button>
           {job && <div className="enhancement-status" role="status">
             <strong>{statusLabels[job.status] ?? job.status}</strong>
             {jobRunning && <progress aria-label="增强进度" max={1} value={job.progress} />}
-            {!jobRunning && job.enhancementSuccess !== null && <span>{job.enhancementSuccess ? `噪声下降 ${db(job.noiseReductionDb)} dB · 人声保护通过` : failed.length ? '人声保护未通过，输出保留此前版本。请试听核对。' : '未生成可用增强结果，原音频保留。'}</span>}
+            {!jobRunning && job.enhancementSuccess !== null && <span>{job.enhancementSuccess ? `${job.actualChain.includes('denoise') ? `噪声下降 ${db(job.noiseReductionDb)} dB · ` : ''}人声保护通过` : failed.length ? '人声保护未通过，输出保留此前版本。请试听核对。' : '未生成可用增强结果，原音频保留。'}</span>}
+            {!jobRunning && job.requestedChain.includes('declip') && <span>{job.declippedRegions ? `已修复 ${job.declippedRegions} 处破音` : '未发现需要修复的破音'}</span>}
           </div>}
           <div className="enhance-continue">
             <button className="btn" onClick={onContinue} disabled={triggering || !!jobRunning}>继续剪辑</button>
@@ -211,8 +226,8 @@ export function EnhancePage({
           <p className="card__hint">通过音色相似度、频谱质心偏移和动态范围检查后才会切换输出；指标为信号分析近似值。</p>
           {job.voiceProtection.map((m) => <KV key={m.key} k={`${m.pass ? '✓' : '!' } ${m.label}${m.hard ? ' · 硬约束' : ''}`}
             v={`${m.value}${m.unit ? ` ${m.unit}` : ''} / ${m.target}`} tone={m.pass ? 'ok' : 'bad'} />)}
-          <KV k="请求处理链" v={job.requestedChain.join(' → ') || '—'} />
-          <KV k="实际处理链" v={job.actualChain.join(' → ') || '—'} tone={chainChanged ? 'warn' : undefined} />
+          <KV k="请求处理链" v={job.requestedChain.map((step) => CHAIN_LABEL[step] ?? step).join(' → ') || '—'} />
+          <KV k="实际处理链" v={job.actualChain.map((step) => CHAIN_LABEL[step] ?? step).join(' → ') || '—'} tone={chainChanged ? 'warn' : undefined} />
           <KV k="任务状态" v={job.status} />
         </details>
         {job.warnings.length > 0 && <div className="status-banner status-banner--warning"><WarningList warnings={job.warnings} /></div>}

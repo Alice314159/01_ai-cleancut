@@ -187,7 +187,7 @@ class TestRunEnhancement:
         session_id = await self._setup_session_with_original_version(isolated_backend, noisy_webm_file)
 
         db = isolated_backend()
-        job = EnhancementJob(session_id=session_id, mode="balanced", status="QUEUED", progress=0.0)
+        job = EnhancementJob(session_id=session_id, mode="balanced", status="QUEUED", progress=0.0, declip_mode="off")
         db.add(job)
         db.commit()
         job_id = job.id
@@ -218,7 +218,7 @@ class TestRunEnhancement:
         session_id = await self._setup_session_with_original_version(isolated_backend, noisy_webm_file)
 
         db = isolated_backend()
-        job = EnhancementJob(session_id=session_id, mode="balanced", status="QUEUED", progress=0.0)
+        job = EnhancementJob(session_id=session_id, mode="balanced", status="QUEUED", progress=0.0, declip_mode="off")
         db.add(job)
         db.commit()
         job_id = job.id
@@ -242,7 +242,7 @@ class TestRunEnhancement:
         session_id = await self._setup_session_with_original_version(isolated_backend, noisy_webm_file)
 
         db = isolated_backend()
-        job = EnhancementJob(session_id=session_id, mode="strong", status="QUEUED", progress=0.0)
+        job = EnhancementJob(session_id=session_id, mode="strong", status="QUEUED", progress=0.0, declip_mode="off")
         db.add(job)
         db.commit()
         job_id = job.id

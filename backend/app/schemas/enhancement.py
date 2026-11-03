@@ -28,8 +28,12 @@ class EnhancementJobOut(CamelModel):
     voice_protection: list[VoiceProtectionMetricOut] = []
     requested_chain: list[str]
     actual_chain: list[str]
+    declip_mode: str = "off"
+    declipped_regions: int = 0
     warnings: list[WarningOut] = []
 
 
 class CreateEnhancementIn(BaseModel):
     mode: Literal["auto", "conservative", "aggressive", "off", "light", "balanced", "strong", "custom"] = "auto"
+    # 去削波：auto 检测到削波才修复；on 总是尝试（无削波时不改动）；off 不做
+    declip: Literal["auto", "on", "off"] = "auto"

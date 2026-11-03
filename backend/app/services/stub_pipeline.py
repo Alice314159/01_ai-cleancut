@@ -164,7 +164,10 @@ async def run_enhancement(job_id: str) -> None:
         job.status = "PROCESSING"
         session = db.get(RecordingSession, session_id)
         session.processing_status = "PROCESSING"
-        chain = [] if job.mode == "off" else ["denoise"]
+        report = db.get(AudioQualityReport, session_id)
+        # auto：质量报告检测到削波（>0.1% 采样贴满幅）才修；on：总是尝试，算法自己判断有没有削波
+        want_declip = job.declip_mode == "on" or (job.declip_mode == "auto" and report is not None and report.clipping_ratio > 0.001)
+        chain = (["declip"] if want_declip else []) + ([] if job.mode == "off" else ["denoise"])
         job.requested_chain = chain
         db.commit()
         await manager.send_json(session_id, {"type": "enhancement_progress", "jobId": job_id, "progress": 0.1})
@@ -172,6 +175,16 @@ async def run_enhancement(job_id: str) -> None:
         raw_path = Path(storage.raw_chunk_path(session_id))
         try:
             samples = await asyncio.to_thread(audio_analysis.decode_pcm, raw_path)
+            original_samples = samples
+            applied = []
+            if want_declip:
+                repaired = await asyncio.to_thread(audio_analysis.declip, samples)
+                job.declipped_regions = repaired.regions
+                if repaired.regions:
+                    samples = repaired.samples
+                    applied.append("declip")
+            if job.mode != "off":
+                applied.append("denoise")
             job.progress = 0.35
             db.commit()
             await manager.send_json(session_id, {"type": "enhancement_progress", "jobId": job_id, "progress": 0.35})
@@ -185,9 +198,11 @@ async def run_enhancement(job_id: str) -> None:
             db.commit()
             await manager.send_json(session_id, {"type": "enhancement_progress", "jobId": job_id, "progress": 0.7})
 
+            # 人声保护比较的是降噪前后（去削波后的信号 vs 降噪结果），去削波本身是修复不是损伤
             vp = await asyncio.to_thread(
                 audio_analysis.compute_voice_protection, samples, denoised_samples, sample_rate=audio_analysis.ANALYSIS_SAMPLE_RATE
             )
+            del original_samples
 
             denoised_path = Path(storage.session_dir(session_id)) / f"denoised_{job_id}.wav"
             await asyncio.to_thread(audio_analysis.encode_wav, denoised_samples, denoised_path, sample_rate=audio_analysis.ANALYSIS_SAMPLE_RATE)
@@ -237,19 +252,19 @@ async def run_enhancement(job_id: str) -> None:
         hard_metrics_passed = all(m[5] for m in metrics if m[6])
         job.enhancement_success = hard_metrics_passed
         job.noise_reduction_db = noise_reduction_db
-        job.actual_chain = chain
+        job.actual_chain = applied
 
         # 产出一个新的音频版本，接管 RENDER_SOURCE / EXPORT_SOURCE 角色
         session = db.get(RecordingSession, session_id)
         denoised = AudioVersion(
             session_id=session_id,
             version_type="denoised",
-            label="未降噪副本" if job.mode == "off" else "降噪版本",
+            label=("去削波版本" if applied == ["declip"] else "未降噪副本") if job.mode == "off" else ("去削波 + 降噪版本" if "declip" in applied else "降噪版本"),
             duration_ms=int(len(denoised_samples) / audio_analysis.ANALYSIS_SAMPLE_RATE * 1000),
             sample_count=len(denoised_samples),
             sample_rate=audio_analysis.ANALYSIS_SAMPLE_RATE,
             latency_ms=0,
-            engine="pcm_passthrough" if job.mode == "off" else "spectral_subtraction",
+            engine="+".join(["declip_poly3"] * ("declip" in applied) + ["spectral_subtraction"] * (job.mode != "off")) or "pcm_passthrough",
             engine_version="1.0",
             determinism="deterministic",
             processing_locality="local",
