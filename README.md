@@ -84,7 +84,7 @@ uvicorn app.main:app --reload --port 8001
 - **安卓模拟器（最接近真机）**：安装 Android Studio，在 Device Manager 里创建一台模拟器并启动，把 `app-debug.apk` 拖进模拟器窗口安装。电脑上运行 `./start.sh --app`，App 连接页填 `10.0.2.2:8001`（模拟器访问电脑本机的固定地址）。录音前在模拟器的 Extended Controls → Microphone 打开“Virtual microphone uses host audio input”，模拟器才能用电脑的麦克风。
 - **电脑浏览器（不装安卓工具）**：一个终端运行 `./start.sh --app`，另一个终端 `cd frontend && npm run preview:app`，浏览器打开 http://127.0.0.1:4173/ ，连接页填 `127.0.0.1:8001`。看到的是 App 内同一套页面（连接页、演示、切换连接）；开发者工具切到手机尺寸更接近真机。它验证不了安卓特有的部分（安装、麦克风权限弹窗、图标与启动画面）。
 
-本地构建 App 版网页：`cd frontend && npm run build:app && npx cap sync android`；有安卓 SDK 时可在 `frontend/android` 运行 `./gradlew assembleDebug`。
+本地构建 App 版网页：`cd frontend && npm run build:app && npx cap sync android`；有 JDK 21 与安卓 SDK 时可在 `frontend/android` 运行 `./gradlew assembleDebug`。
 
 ## 在手机上测试
 

@@ -150,6 +150,6 @@ npm run build:demo
 ## 安卓 App（Capacitor）
 
 - `npm run build:app`：App 版网页（`VITE_APP=1`，输出 `dist-app/`）。首次打开选择“连接电脑”或“先看演示”，选择保存在 App 本机。
-- `npx cap sync android`：把 `dist-app/` 同步进 `android/` 工程；`android/` 下运行 `./gradlew assembleDebug` 生成 APK（需要 JDK 17 与 Android SDK）。
+- `npx cap sync android`：把 `dist-app/` 同步进 `android/` 工程；`android/` 下运行 `./gradlew assembleDebug` 生成 APK（需要 JDK 21 与 Android SDK（compileSdk 36））。
 - GitHub 上由 `.github/workflows/android-apk.yml` 自动完成上述步骤，产物在运行页面的 Artifacts。
 - 页面来源为 `http://localhost`（`capacitor.config.json` 中 `androidScheme: http`），以便访问局域网内的 `http://` 后端，同时仍是安全上下文，可使用麦克风。
