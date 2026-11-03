@@ -753,6 +753,52 @@ def _content_features(x: np.ndarray, sample_rate: int) -> dict | None:
     }
 
 
+def _segment_pitches(x: np.ndarray, sample_rate: int, segment_s: float = 1.5) -> np.ndarray:
+    """每 1.5 秒一段的中位基频（Hz）；用 FFT 自相关批量计算，清音/静音段跳过。"""
+    win, hop = 512, 320
+    seg = int(segment_s * sample_rate)
+    lo, hi = int(sample_rate / 400), int(sample_rate / 70)
+    medians = []
+    for start in range(0, len(x) - seg + 1, seg):
+        part = x[start:start + seg].astype(np.float64)
+        if np.mean(part ** 2) < 1e-4:
+            continue
+        frames = np.lib.stride_tricks.sliding_window_view(part, win)[::hop]
+        frames = frames - frames.mean(1, keepdims=True)
+        spectrum = np.fft.rfft(frames, n=2 * win, axis=1)
+        ac = np.fft.irfft(np.abs(spectrum) ** 2, axis=1)[:, :win]
+        energy = ac[:, 0]
+        lag = lo + np.argmax(ac[:, lo:hi], axis=1)
+        strength = ac[np.arange(len(ac)), lag] / np.maximum(energy, 1e-12)
+        voiced = (strength > 0.4) & (energy > np.percentile(energy, 30))
+        if voiced.sum() >= 5:
+            medians.append(float(np.median(sample_rate / lag[voiced])))
+    return np.array(medians)
+
+
+def multiple_voices(samples: np.ndarray, sample_rate: int = ANALYSIS_SAMPLE_RATE) -> float | None:
+    """
+    是否明显有两种音高的说话人（如男女对谈）：把每段的基频分成高低两组，
+    两组中心相差 ≥40% 且较小一组占 ≥20% 的说话时间才算，返回置信度；否则 None。
+    同性别、音高接近的多人分不出来；也从不判定“单人”。
+    """
+    pitches = np.concatenate([_segment_pitches(part, sample_rate) for part in _excerpts(samples, sample_rate)])
+    if len(pitches) < 8:  # 至少约 12 秒有声语音
+        return None
+    logp = np.log(pitches)
+    centers = np.array([logp.min(), logp.max()])
+    for _ in range(30):
+        labels = np.abs(logp[:, None] - centers[None]).argmin(1)
+        if len(set(labels)) < 2:
+            return None
+        centers = np.array([logp[labels == k].mean() for k in (0, 1)])
+    ratio = float(np.exp(abs(centers[1] - centers[0])))
+    share = float(min(np.mean(labels == 0), np.mean(labels == 1)))
+    if ratio >= 1.4 and share >= 0.2:
+        return round(min(0.85, 0.5 + (ratio - 1.4) + share / 2), 2)
+    return None
+
+
 def classify_content(samples: np.ndarray, sample_rate: int = ANALYSIS_SAMPLE_RATE) -> ContentEstimate:
     """
     按信号特征粗分素材类型，拿不准时返回 unknown：
@@ -760,7 +806,7 @@ def classify_content(samples: np.ndarray, sample_rate: int = ANALYSIS_SAMPLE_RAT
     - 音乐为主：频谱在 0.3 秒后仍基本不变（长音/和弦），且没有说话那样的起伏；
     - 人声 + 背景音乐：有人声，同时最安静的部分是持续的乐音而不是噪声；
     - 无人声：几乎没有声音，或只有平坦的噪声。
-    不区分单人与多人（需要说话人分离模型）。
+    音高明显不同的多人（如男女对谈）标为多人对话；音高接近的多人分不出，也从不判定“单人”。
     """
     rows = [f for f in (_content_features(part, sample_rate) for part in _excerpts(samples, sample_rate)) if f]
     if not rows:
@@ -776,6 +822,9 @@ def classify_content(samples: np.ndarray, sample_rate: int = ANALYSIS_SAMPLE_RAT
     if speech and tonal_background:
         return ContentEstimate("speech_with_music", round(min(0.9, 0.5 + (f["background_stationarity"] - 0.5)), 2), rounded)
     if speech:
+        voices = multiple_voices(samples, sample_rate)
+        if voices is not None:
+            return ContentEstimate("multi_speaker_speech", voices, rounded)
         return ContentEstimate("speech", round(min(0.9, 0.5 + (f["depth_db"] - 4.5) / 10 + (f["syllabic"] - 0.4)), 2), rounded)
     if f["stationarity"] >= 0.7 and f["depth_db"] < 4:
         return ContentEstimate("music_dominant", round(min(0.9, 0.5 + (f["stationarity"] - 0.7) * 2), 2), rounded)

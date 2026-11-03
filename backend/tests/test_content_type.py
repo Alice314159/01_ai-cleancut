@@ -92,3 +92,40 @@ async def test_quality_report_records_content_type(isolated_backend, tmp_path):
     with isolated_backend() as db:
         report = db.get(AudioQualityReport, session_id)
         assert report.content_type == "speech" and report.content_type_confidence >= 0.6
+
+
+def voice_lines(tmp_path, voice, count=2):
+    parts = []
+    for i in range(count):
+        path = tmp_path / f"{voice}_{i}.wav"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                        f"flite=text='This is sentence number {i} from the {voice} voice. We are testing how well the tool "
+                        f"can tell different people apart in a recording.':voice={voice}",
+                        "-ar", str(SR), "-ac", "1", str(path)], check=True)
+        parts.append(audio_analysis.decode_pcm(path))
+    return parts
+
+
+def dialogue(*speakers):
+    return np.concatenate([part for turn in zip(*speakers) for part in turn])
+
+
+@needs_flite
+@pytest.mark.parametrize("a,b", [("kal", "slt"), ("slt", "rms"), ("kal", "awb")])
+def test_dialogue_with_clearly_different_voices_is_multi_speaker(tmp_path, a, b):
+    result = audio_analysis.classify_content(dialogue(voice_lines(tmp_path, a), voice_lines(tmp_path, b)))
+    assert result.content_type == "multi_speaker_speech" and result.confidence >= 0.6
+
+
+@needs_flite
+@pytest.mark.parametrize("voice", ["kal", "slt", "awb", "rms"])
+def test_single_voice_is_never_called_multi(tmp_path, voice):
+    lines = voice_lines(tmp_path, voice, 4)
+    assert audio_analysis.classify_content(np.concatenate(lines)).content_type == "speech"
+
+
+@needs_flite
+def test_similar_voices_stay_undetermined_rather_than_single(tmp_path):
+    """已知局限：两个音高接近的同性别说话人分不出来，结果保持“人声（未区分人数）”，不冒称单人。"""
+    result = audio_analysis.classify_content(dialogue(voice_lines(tmp_path, "awb"), voice_lines(tmp_path, "rms")))
+    assert result.content_type == "speech"
