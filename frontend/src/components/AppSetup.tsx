@@ -43,6 +43,7 @@ export function AppSetup() {
         <button className="btn btn--primary" type="submit" disabled={checking}>{checking ? '正在连接…' : '连接'}</button>
       </form>
       {error && <p className="app-setup__error" role="alert">{error}</p>}
+      <p className="app-setup__hint">在电脑上的安卓模拟器里测试时填 <code>10.0.2.2:8001</code>；在电脑浏览器里测试时填 <code>127.0.0.1:8001</code>。</p>
       <div className="app-setup__demo">
         <span>暂时没有电脑？</span>
         <button className="btn" type="button" onClick={() => { useDemo(); window.location.reload() }}>先看演示</button>

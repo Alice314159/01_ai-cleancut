@@ -101,7 +101,8 @@ BACKEND_HOST=127.0.0.1
 if [[ "$APP" == 1 ]]; then
   # 安卓 App 的页面来源是 http://localhost（Capacitor），需要直接访问后端并允许跨域
   BACKEND_HOST=0.0.0.0
-  export CLEANCUT_CORS_ORIGINS="${CLEANCUT_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost,https://localhost,capacitor://localhost}"
+  # 4173 为 npm run preview:app（在电脑浏览器里测试 App 版页面）
+  export CLEANCUT_CORS_ORIGINS="${CLEANCUT_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost,https://localhost,capacitor://localhost,http://localhost:4173,http://127.0.0.1:4173}"
 fi
 (
   cd "$ROOT/backend"
@@ -156,6 +157,8 @@ elif [[ "$APP" == 1 ]]; then
   printf '\nAI CleanCut 已启动（App 模式）\n'
   printf '  电脑浏览器：http://127.0.0.1:5173/\n'
   printf '  App 连接地址：%s:8001   （在手机 App 的“连接电脑”里填写，手机与电脑需连同一个 Wi-Fi）\n' "$LAN_IP"
+  printf '  电脑上的安卓模拟器：在 App 里填 10.0.2.2:8001（模拟器访问电脑本机的固定地址）\n'
+  printf '  电脑浏览器测试 App 页面：另开终端执行 cd frontend && npm run preview:app，打开 http://127.0.0.1:4173/ 并填 127.0.0.1:8001\n'
   printf '后端此时在局域网内无需登录即可访问，只在家里/办公室等可信网络中使用。\n'
   printf '保持此终端打开；按 Ctrl+C 同时停止前后端。\n'
 else
