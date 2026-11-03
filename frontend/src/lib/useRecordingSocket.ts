@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, WS_BASE } from './api'
+import { withToken } from './auth'
 import { ChunkQueue, encodeFrame } from './chunkQueue'
 import { chunkStore } from './chunkStore'
 import { toDbfs } from './format'
@@ -81,7 +82,7 @@ export function useRecordingSocket(sessionId: string | null) {
 
   const connect = useCallback((resume: boolean): Promise<WebSocket> => {
     if (!sessionId) return Promise.reject(new Error('没有可用的会话'))
-    const ws = new WebSocket(`${WS_BASE}/ws/recording/${sessionId}${resume ? '?resume=1' : ''}`)
+    const ws = new WebSocket(withToken(`${WS_BASE}/ws/recording/${sessionId}${resume ? '?resume=1' : ''}`))
     wsRef.current = ws
     ws.binaryType = 'arraybuffer'
     return new Promise<WebSocket>((resolve, reject) => {
@@ -100,6 +101,11 @@ export function useRecordingSocket(sessionId: string | null) {
         if (wsRef.current !== ws) return
         wsRef.current = null
         // 4404/4409：会话不存在或已经结束（例如等待重连超时），无法再续传
+        if (event.code === 4401) {
+          resumableRef.current = false
+          setConnError('配对码无效或已更换，录音连接被拒绝。请重新输入电脑终端显示的配对码后再录。')
+          return
+        }
         if (event.code === 4404 || event.code === 4409) {
           if (resumableRef.current) {
             deadRef.current = true

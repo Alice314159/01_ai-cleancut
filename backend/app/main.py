@@ -1,7 +1,12 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app import access
 
 from app.config import CORS_ORIGINS
 from app.db import init_db
@@ -35,6 +40,28 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 
+logging.getLogger("uvicorn.access").addFilter(access.RedactTokenFilter())
+
+
+@app.middleware("http")
+async def require_pairing_code(request: Request, call_next):
+    """--lan / --app 模式下校验配对码；CORS 预检与健康检查放行。"""
+    path = request.url.path
+    if access.enabled() and path.startswith("/api") and path not in access.OPEN_PATHS and request.method != "OPTIONS":
+        result = access.check(access.presented(request.headers, request.query_params))
+        if result != "ok":
+            detail = "配对码错误次数过多，请 1 分钟后再试" if result == "locked" else "需要配对码：请输入电脑终端显示的配对码"
+            response = JSONResponse({"detail": detail, "code": "pairing_required"}, status_code=429 if result == "locked" else 401)
+            # 中间件在 CORS 之前返回时也要带上跨域头，否则浏览器只会报“跨域失败”，看不到需要配对码
+            origin = request.headers.get("origin")
+            if origin and origin in CORS_ORIGINS:
+                response.headers["access-control-allow-origin"] = origin
+                response.headers["access-control-allow-credentials"] = "true"
+                response.headers["vary"] = "Origin"
+            return response
+    return await call_next(request)
+
+
 app.include_router(sessions.router)
 app.include_router(enhancement.router)
 app.include_router(review.router)
@@ -46,6 +73,12 @@ app.include_router(chapters.router)
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/auth/check")
+def auth_check():
+    """配对码有效（或未启用配对）时返回 200；用于 App 连接页验证地址与配对码。"""
+    return {"ok": True, "pairing": access.enabled()}
 
 
 @app.get("/api/capabilities")

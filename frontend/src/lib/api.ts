@@ -1,4 +1,5 @@
 import { appServer, IS_APP } from './appConfig'
+import { authHeaders, notifyPairingRequired, withToken } from './auth'
 import type {
   RenderTranscript,
   AudioQualityReport,
@@ -126,9 +127,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // FormData bodies need the browser's own multipart boundary header; setting
   // Content-Type ourselves here would strip it and break the upload.
   const isFormData = init?.body instanceof FormData
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: isFormData ? (init?.headers ?? {}) : { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+  const res = await authFetch(`${API_BASE}${path}`, {
     ...init,
+    headers: { ...(isFormData ? {} : { 'Content-Type': 'application/json' }), ...(init?.headers ?? {}) },
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
@@ -143,6 +144,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+/**
+ * 带配对码的 fetch；后端回“需要配对码”时通知界面弹出输入框（局域网 / App 模式）。
+ */
+async function authFetch(url: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(url, { ...init, headers: { ...authHeaders(), ...((init?.headers as Record<string, string>) ?? {}) } })
+  if (res.status === 401 || res.status === 429) {
+    const body = await res.clone().json().catch(() => null)
+    if (body?.code === 'pairing_required') notifyPairingRequired(typeof body.detail === 'string' ? body.detail : '需要配对码')
+  }
+  return res
 }
 
 /** 404 视为"还没有"，调用方按 null 处理，不当成错误抛出。 */
@@ -192,7 +205,7 @@ export const api = {
     return requestOrNull<{ envelope: number[] }>(`/api/sessions/${id}/waveform?buckets=${buckets}`)
   },
   audioUrl(sessionId: string, versionId: string) {
-    return demoAudioUrl(sessionId, versionId) ?? `${API_BASE}/api/sessions/${sessionId}/versions/${versionId}/audio`
+    return demoAudioUrl(sessionId, versionId) ?? withToken(`${API_BASE}/api/sessions/${sessionId}/versions/${versionId}/audio`)
   },
   getWarnings(id: string) {
     return request<Warning[]>(`/api/sessions/${id}/warnings`)
@@ -235,7 +248,7 @@ export const api = {
     return requestOrNull<RenderOutput>(`/api/sessions/${id}/render`)
   },
   downloadUrl(id: string, versionId: string) {
-    return demoAudioUrl(id, versionId) ?? `${API_BASE}/api/sessions/${id}/versions/${versionId}/audio?download=true`
+    return demoAudioUrl(id, versionId) ?? withToken(`${API_BASE}/api/sessions/${id}/versions/${versionId}/audio?download=true`)
   },
   suggestDecisions(id: string, transcriptionJobId: string) {
     return request<{ addedCount: number; decisions: EditDecision[] }>(`/api/sessions/${id}/decisions/suggest`, {
@@ -281,7 +294,7 @@ export const api = {
     })
   },
   async downloadRenderSubtitles(id: string, versionId: string, format: 'txt' | 'srt' = 'srt') {
-    const response = await fetch(`${API_BASE}/api/sessions/${id}/render/${versionId}/subtitles?format=${format}`)
+    const response = await authFetch(`${API_BASE}/api/sessions/${id}/render/${versionId}/subtitles?format=${format}`)
     if (!response.ok) {
       const error = await response.json().catch(() => null)
       throw new Error(error?.detail ?? '成片字幕导出失败')
@@ -297,7 +310,7 @@ export const api = {
     return request<SessionDetail>(`/api/sessions/${id}/cover`, { method: 'DELETE' })
   },
   coverUrl(id: string, version: string) {
-    return demoCoverUrl(id) ?? `${API_BASE}/api/sessions/${id}/cover?v=${encodeURIComponent(version)}`
+    return demoCoverUrl(id) ?? withToken(`${API_BASE}/api/sessions/${id}/cover?v=${encodeURIComponent(version)}`)
   },
   /** 后端可选能力（是否安装了本机转写等），决定前端是否提供相关开关 */
   capabilities() {
@@ -319,14 +332,14 @@ export const api = {
     return request<MappedChapter[]>(`/api/sessions/${id}/versions/${versionId}/chapters`)
   },
   async versionChaptersText(id: string, versionId: string) {
-    const response = await fetch(`${API_BASE}/api/sessions/${id}/versions/${versionId}/chapters?format=txt`)
+    const response = await authFetch(`${API_BASE}/api/sessions/${id}/versions/${versionId}/chapters?format=txt`)
     if (!response.ok) throw new Error('章节列表读取失败')
     return response.text()
   },
   /** 转码为 MP3 / M4A 下载；返回文件内容和服务端建议的文件名。 */
   async exportAudio(id: string, versionId: string, format: ExportFormat, bitrateKbps: number) {
     const query = new URLSearchParams({ format, bitrate: String(bitrateKbps) })
-    const response = await fetch(`${API_BASE}/api/sessions/${id}/versions/${versionId}/export?${query}`)
+    const response = await authFetch(`${API_BASE}/api/sessions/${id}/versions/${versionId}/export?${query}`)
     if (!response.ok) {
       const error = await response.json().catch(() => null)
       throw new Error(typeof error?.detail === 'string' ? error.detail : '音频导出失败')
@@ -336,7 +349,7 @@ export const api = {
   },
   async downloadTranscript(id: string, transcriptionJobId: string, format: 'txt' | 'srt') {
     const query = new URLSearchParams({ transcriptionJobId, format })
-    const response = await fetch(`${API_BASE}/api/sessions/${id}/transcript/export?${query}`)
+    const response = await authFetch(`${API_BASE}/api/sessions/${id}/transcript/export?${query}`)
     if (!response.ok) {
       const error = await response.json().catch(() => null)
       throw new Error(error?.detail ?? '转写导出失败')

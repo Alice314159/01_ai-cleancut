@@ -3,7 +3,7 @@ import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app import db as db_module
+from app import access, db as db_module
 from app.models import RecordingSession
 from app.services import live_hints, storage
 from app.services.stub_pipeline import schedule_capture_stop, simulate_capture_signals
@@ -66,6 +66,9 @@ def recover_reconnecting_sessions() -> None:
 
 @router.websocket("/ws/recording/{session_id}")
 async def recording_socket(ws: WebSocket, session_id: str):
+    if access.check(access.presented(ws.headers, ws.query_params)) != "ok":
+        await ws.close(code=4401)
+        return
     db = db_module.SessionLocal()
     session = db.get(RecordingSession, session_id)
     # 录后处理会话只接受 POST /import 写入音频；不拒绝的话，导入过程中（甚至导入前的

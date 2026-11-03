@@ -70,13 +70,23 @@ uvicorn app.main:app --reload --port 8001
 `./start.sh --check` 仅检查依赖和端口；日志保存到 `.run/backend.log` 和 `.run/frontend.log`（每次启动覆盖）。
 已有服务占用端口时会提示并退出，不会关闭其他进程。首次依赖安装仍按下方说明完成。
 
+## 局域网配对码
+
+`./start.sh --lan` 和 `./start.sh --app` 会让同一 Wi-Fi 下的设备访问这台电脑，所以启动时生成 8 位配对码（如 `K7Q2-9XMA`，去掉了易混淆的 0/O/1/I/L），打印在终端里；所有 `/api` 与 `/ws` 请求都必须带配对码，只在本机访问的默认模式不需要。
+
+- 浏览器：打开终端打印的带 `#pair=…` 的链接即自动配对（配对码随后从地址栏移除）；否则页面弹出输入框。
+- 安卓 App：连接页填写电脑地址和配对码。
+- 每次启动生成新配对码，旧设备需重新输入；想固定可设置 `CLEANCUT_ACCESS_TOKEN=自定义配对码`。
+- 一分钟内错误超过 20 次，接下来 1 分钟拒绝新的尝试（已配对设备不受影响）。
+- 媒体与下载链接只能把配对码放在网址参数里，后端访问日志中会替换为 `***`。
+
 ## 安卓 App（GitHub 自动打包）
 
 `frontend/` 用 Capacitor 包装成安卓 App，GitHub Actions 自动编译 APK（`.github/workflows/android-apk.yml`）：前端有改动推送时自动运行，也可以在 GitHub 的 **Actions → Android APK → Run workflow** 手动运行。完成后在该次运行页面底部的 **Artifacts** 下载 `cleancut-android-apk`，解压得到 `app-debug.apk`，传到手机安装（需允许“安装未知来源应用”）。
 
 - APK 使用仓库里固定的调试签名（`frontend/android/app/debug.keystore`，标准调试口令，仅供测试安装，不能上架应用商店），版本号随运行次数递增，新版可直接覆盖安装。
-- App 首次打开选择 **连接电脑** 或 **先看演示**。连接电脑：在电脑上运行 `./start.sh --app`，把终端显示的“App 连接地址”（如 `192.168.1.23:8001`）填进 App；转写、降噪、剪辑仍在电脑上完成，手机负责录音、试听和剪辑操作，首次录音时系统会请求麦克风权限。
-- `--app` 模式下后端在局域网 8001 端口无需登录即可访问，并允许 App 跨域访问，只在家里／办公室等可信网络中使用。电脑防火墙需允许 8001 端口入站。
+- App 首次打开选择 **连接电脑** 或 **先看演示**。连接电脑：在电脑上运行 `./start.sh --app`，把终端显示的“App 连接地址”（如 `192.168.1.23:8001`）和“配对码”填进 App；转写、降噪、剪辑仍在电脑上完成，手机负责录音、试听和剪辑操作，首次录音时系统会请求麦克风权限。
+- `--app` 模式下后端在局域网 8001 端口可访问并允许 App 跨域访问；访问需要配对码（见下方“局域网配对码”）。电脑防火墙需允许 8001 端口入站。
 - 顶栏“切换连接”可改填地址或改用演示模式。
 - 正式签名（上架或长期分发用）：本机生成自己的密钥（务必另行备份，丢失后无法再更新同一 App），
   然后在 GitHub 仓库 **Settings → Secrets and variables → Actions** 添加四项：`ANDROID_RELEASE_KEYSTORE_BASE64`（下面命令输出的整段文本）、`ANDROID_RELEASE_STORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`（如 `cleancut`）、`ANDROID_RELEASE_KEY_PASSWORD`。之后每次运行额外产出 `cleancut-android-release`（正式签名的 `app-release.apk` 与应用商店用的 `app-release.aab`）。密钥只在构建机临时解出，构建结束即删除，不进仓库。正式签名与调试签名不同，从调试版改装正式版需先卸载。
@@ -107,7 +117,8 @@ base64 -w0 cleancut-release.keystore
 ```
 
 1. 终端会打印手机访问地址，例如 `https://192.168.1.23:5173/`（多网卡时可用 `CLEANCUT_LAN_IP=192.168.x.x ./start.sh --lan` 指定）。手机连同一个 Wi-Fi 后在浏览器打开。
-2. 首次会提示证书不受信任：这是脚本在本机生成的自签名证书（保存在 `.run/lan-cert`，IP 变化时自动重新生成）。Android Chrome 点“高级 → 继续前往”；iPhone Safari 点“显示详细信息 → 访问此网站”。之所以用 HTTPS，是因为手机浏览器只在 HTTPS 下允许麦克风录音。
+2. 终端同时显示 8 位**配对码**，手机链接已带上配对码（`#pair=…`），打开即自动配对；手动打开时页面会弹出输入框。
+3. 首次会提示证书不受信任：这是脚本在本机生成的自签名证书（保存在 `.run/lan-cert`，IP 变化时自动重新生成）。Android Chrome 点“高级 → 继续前往”；iPhone Safari 点“显示详细信息 → 访问此网站”。之所以用 HTTPS，是因为手机浏览器只在 HTTPS 下允许麦克风录音。
 3. 添加到主屏幕：Android Chrome 菜单 →“添加到主屏幕”；iPhone Safari 分享 →“添加到主屏幕”。从桌面打开时全屏显示，没有浏览器地址栏。
 
 手机只连前端地址，`/api` 与 `/ws` 由前端服务转发给只监听 `127.0.0.1` 的后端，后端不直接暴露在局域网上。电脑防火墙需允许 5173 端口的入站连接。证书未被系统信任时浏览器不会启用离线缓存，不影响正常使用；如需去掉警告，可把 `.run/lan-cert/cert.pem` 安装为手机的受信任证书。
@@ -150,8 +161,10 @@ npm run dev
 ```bash
 cd backend
 pip install -r requirements.txt -r requirements-dev.txt
-pytest -q
+pytest -q -n auto
 ```
+
+`-n auto` 按 CPU 核数并行运行（依赖 `pytest-xdist`，已在 requirements-dev.txt 中）；直接 `pytest -q` 也可以，只是慢一些。
 
 测试使用隔离的临时 SQLite 和音频目录，覆盖信号处理、REST、实际 WebSocket、失败回退、重复增强和数据库兼容升级。
 

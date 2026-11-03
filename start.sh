@@ -12,7 +12,7 @@ usage() {
   printf '用法：./start.sh [--lan] [--app] [--check]\n'
   printf '  默认启动前后端，仅本机可访问，Ctrl+C 停止。\n'
   printf '  --lan   让同一 Wi-Fi 下的手机也能访问（HTTPS，自签名证书），用于手机测试。\n'
-  printf '  --app   供安卓 App 连接：后端在局域网 8001 端口可访问（无登录，仅在可信网络使用）。\n'
+  printf '  --app   供安卓 App 连接：后端在局域网 8001 端口可访问，需配对码。\n'
   printf '  --check 仅检查依赖与端口。\n'
 }
 CHECK_ONLY=0
@@ -78,6 +78,17 @@ if [[ "$LAN" == 1 ]]; then
 fi
 printf '依赖与端口检查通过。\n'
 [[ "$CHECK_ONLY" != 1 ]] || exit 0
+PAIR_CODE=''
+if [[ "$LAN" == 1 || "$APP" == 1 ]]; then
+  # 局域网可访问时要求配对码：8 位，去掉易混淆的 0/O/1/I/L；可用 CLEANCUT_ACCESS_TOKEN 指定固定值
+  if [[ -n "${CLEANCUT_ACCESS_TOKEN:-}" ]]; then
+    PAIR_CODE="$CLEANCUT_ACCESS_TOKEN"
+  else
+    raw="$(LC_ALL=C tr -dc 'ABCDEFGHJKMNPQRSTUVWXYZ23456789' </dev/urandom | head -c 8 || true)"
+    PAIR_CODE="${raw:0:4}-${raw:4:4}"
+  fi
+  export CLEANCUT_ACCESS_TOKEN="$PAIR_CODE"
+fi
 mkdir -p "$RUN_DIR"
 # A directory lock prevents two launchers racing before the ports have been bound.
 mkdir "$RUN_DIR/launcher.lock" 2>/dev/null || fail '已有启动脚本正在运行；若之前异常退出，请确认旧服务已停止，再删除 .run/launcher.lock 空目录。'
@@ -145,9 +156,10 @@ done
 if [[ "$LAN" == 1 ]]; then
   PHONE_URL="https://$LAN_IP:5173/"
   printf '\nAI CleanCut 已启动（局域网模式）\n'
-  printf '  电脑：https://127.0.0.1:5173/\n'
-  printf '  手机：%s   （手机与电脑需连同一个 Wi-Fi）\n\n' "$PHONE_URL"
-  if command -v qrencode >/dev/null 2>&1; then qrencode -t ANSIUTF8 "$PHONE_URL"; fi
+  printf '  配对码：%s   （首次打开时输入；下面的链接已带配对码，打开即自动配对）\n' "$PAIR_CODE"
+  printf '  电脑：https://127.0.0.1:5173/#pair=%s\n' "$PAIR_CODE"
+  printf '  手机：%s#pair=%s   （手机与电脑需连同一个 Wi-Fi）\n\n' "$PHONE_URL" "$PAIR_CODE"
+  if command -v qrencode >/dev/null 2>&1; then qrencode -t ANSIUTF8 "${PHONE_URL}#pair=${PAIR_CODE}"; fi
   printf '首次打开会提示“连接不是私密连接/证书不受信任”：这是本机生成的自签名证书，\n'
   printf '  · Android Chrome：点“高级” → “继续前往”；\n'
   printf '  · iPhone Safari：点“显示详细信息” → “访问此网站”。\n'
@@ -155,11 +167,12 @@ if [[ "$LAN" == 1 ]]; then
   printf '保持此终端打开；按 Ctrl+C 同时停止前后端。\n'
 elif [[ "$APP" == 1 ]]; then
   printf '\nAI CleanCut 已启动（App 模式）\n'
-  printf '  电脑浏览器：http://127.0.0.1:5173/\n'
-  printf '  App 连接地址：%s:8001   （在手机 App 的“连接电脑”里填写，手机与电脑需连同一个 Wi-Fi）\n' "$LAN_IP"
+  printf '  配对码：%s\n' "$PAIR_CODE"
+  printf '  电脑浏览器：http://127.0.0.1:5173/#pair=%s\n' "$PAIR_CODE"
+  printf '  App 连接地址：%s:8001   （在手机 App 的“连接电脑”里填写地址和配对码，手机与电脑需连同一个 Wi-Fi）\n' "$LAN_IP"
   printf '  电脑上的安卓模拟器：在 App 里填 10.0.2.2:8001（模拟器访问电脑本机的固定地址）\n'
   printf '  电脑浏览器测试 App 页面：另开终端执行 cd frontend && npm run preview:app，打开 http://127.0.0.1:4173/ 并填 127.0.0.1:8001\n'
-  printf '后端此时在局域网内无需登录即可访问，只在家里/办公室等可信网络中使用。\n'
+  printf '局域网内的设备需要配对码才能访问；每次启动生成新的配对码，旧设备需重新输入。\n'
   printf '保持此终端打开；按 Ctrl+C 同时停止前后端。\n'
 else
   printf '\nAI CleanCut 已启动：http://127.0.0.1:5173/\n保持此终端打开；按 Ctrl+C 同时停止前后端。\n'

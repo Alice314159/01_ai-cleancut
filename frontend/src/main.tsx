@@ -4,7 +4,12 @@ import App from './App'
 import { installDemo } from './demo/server'
 import { AppSetup } from './components/AppSetup'
 import { appMode, IS_APP } from './lib/appConfig'
+import { captureFromHash } from './lib/auth'
+import { PairingPrompt } from './components/PairingPrompt'
 import './styles/app.css'
+
+// 终端打印的链接带 #pair=配对码：保存并从地址栏移除
+captureFromHash()
 
 function mount() {
   // 安卓 App 首次打开（还没选连接电脑或演示）先显示设置页
@@ -12,6 +17,7 @@ function mount() {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       {needsSetup ? <AppSetup /> : <App />}
+      <PairingPrompt />
     </StrictMode>,
   )
 }

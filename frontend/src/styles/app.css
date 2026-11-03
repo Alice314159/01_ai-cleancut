@@ -1825,3 +1825,13 @@ select:disabled { opacity: .55; cursor: not-allowed; }
 .live-hint { display: flex; gap: 10px; align-items: baseline; font-size: var(--step--1); }
 .live-hint .mono { color: var(--accent); font-variant-numeric: tabular-nums; }
 .live-hint--repetition, .live-hint--stutter { color: var(--sig-provisional); }
+
+/* 配对码 */
+.app-setup__form { grid-template-columns: minmax(0, 1fr); }
+.pairing-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / 60%); }
+.pairing-dialog { width: min(420px, 100%); display: grid; gap: 10px; padding: 20px; border-radius: 14px; background: var(--surface); border: 1px solid var(--hairline); }
+.pairing-dialog h2 { margin: 0; font-size: 1.2rem; }
+.pairing-dialog p { margin: 0; color: var(--text-dim); }
+.pairing-dialog code { color: var(--text); background: var(--surface-2); padding: 1px 6px; border-radius: 5px; }
+.pairing-dialog input { font: inherit; font-size: 18px; letter-spacing: .12em; text-transform: uppercase; color: var(--text); background: var(--ink);
+  border: 1px solid var(--hairline); border-radius: var(--radius); padding: 10px 12px; min-width: 0; }

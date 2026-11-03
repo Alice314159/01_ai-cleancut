@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from 'react'
 import { normalizeServer, useDemo, useServer } from '../lib/appConfig'
+import { normalizeCode, setAccessToken } from '../lib/auth'
 
 /** 安卓 App 首次打开：连接电脑上运行的 CleanCut，或先看演示。 */
 export function AppSetup() {
   const [address, setAddress] = useState('')
+  const [code, setCode] = useState('')
   const [checking, setChecking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -15,8 +17,15 @@ export function AppSetup() {
     const controller = new AbortController()
     const timer = window.setTimeout(() => controller.abort(), 5000)
     try {
-      const response = await fetch(`${url}/api/health`, { signal: controller.signal })
+      const token = normalizeCode(code)
+      const response = await fetch(`${url}/api/auth/check`, { signal: controller.signal, headers: token ? { 'X-CleanCut-Token': token } : {} })
+      if (response.status === 401 || response.status === 429) {
+        const body = await response.json().catch(() => null)
+        setError(body?.detail ?? '配对码不正确')
+        return
+      }
       if (!response.ok) throw new Error(String(response.status))
+      setAccessToken(token || null)
       useServer(url)
       window.location.reload()
     } catch {
@@ -35,11 +44,13 @@ export function AppSetup() {
       <ol className="app-setup__steps">
         <li>在电脑的项目目录运行 <code>./start.sh --app</code></li>
         <li>手机连上和电脑相同的 Wi-Fi</li>
-        <li>把终端里显示的“App 连接地址”填在下面</li>
+        <li>把终端里显示的“App 连接地址”和“配对码”填在下面</li>
       </ol>
       <form onSubmit={connect} className="app-setup__form">
         <input aria-label="电脑地址" inputMode="url" autoCapitalize="off" autoCorrect="off" placeholder="192.168.1.23:8001"
           value={address} onChange={(event) => setAddress(event.target.value)} disabled={checking} />
+        <input aria-label="配对码" autoCapitalize="characters" autoCorrect="off" spellCheck={false} placeholder="配对码 XXXX-XXXX"
+          value={code} onChange={(event) => setCode(event.target.value)} disabled={checking} />
         <button className="btn btn--primary" type="submit" disabled={checking}>{checking ? '正在连接…' : '连接'}</button>
       </form>
       {error && <p className="app-setup__error" role="alert">{error}</p>}
