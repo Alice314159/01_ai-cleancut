@@ -11,7 +11,7 @@ FastAPI + SQLAlchemy + SQLite，FFmpeg + NumPy 处理音频。REST 响应通过 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
 uvicorn app.main:app --reload --port 8001
-pytest -q
+pytest -q -n auto
 ```
 
 系统需安装 `ffmpeg`。可选 `python tests/browser_smoke.py` 运行真实浏览器测试，需要 Python Playwright 及 Chromium；浏览器脚本自行启动临时服务，不使用真实数据库。

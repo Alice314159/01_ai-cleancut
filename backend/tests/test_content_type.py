@@ -1,5 +1,8 @@
 """内容类型估计：音乐 / 噪声 / 静音用合成信号，人声用 ffmpeg 自带的 flite 语音合成（不可用时跳过）。"""
+import functools
+import shutil
 import subprocess
+import tempfile
 
 import numpy as np
 import pytest
@@ -24,11 +27,28 @@ TEXT = ("So the question I keep getting is how do you edit a podcast quickly. Ho
         "the pauses, remove the repeats, and keep the energy up. Let me show you a real example.")
 
 
+# 语音合成较慢：同一段文字/声音在整个测试会话里只合成一次（测试只读，不修改返回的数组）
+_CACHE_DIR = tempfile.mkdtemp(prefix="cleancut-flite-")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _cleanup_cache():
+    yield
+    shutil.rmtree(_CACHE_DIR, ignore_errors=True)
+
+
+@functools.lru_cache(maxsize=None)
+def _synthesize(text: str, voice: str):
+    path = f"{_CACHE_DIR}/{abs(hash((text, voice)))}.wav"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"flite=text='{text}':voice={voice}",
+                    "-ar", str(SR), "-ac", "1", path], check=True)
+    samples = audio_analysis.decode_pcm(__import__("pathlib").Path(path))
+    samples.setflags(write=False)
+    return samples
+
+
 def speech(tmp_path, voice="kal"):
-    path = tmp_path / f"speech_{voice}.wav"
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"flite=text='{TEXT}':voice={voice}",
-                    "-ar", str(SR), "-ac", "1", str(path)], check=True)
-    return audio_analysis.decode_pcm(path)
+    return _synthesize(TEXT, voice)
 
 
 def music(seconds=12):
@@ -95,15 +115,8 @@ async def test_quality_report_records_content_type(isolated_backend, tmp_path):
 
 
 def voice_lines(tmp_path, voice, count=2):
-    parts = []
-    for i in range(count):
-        path = tmp_path / f"{voice}_{i}.wav"
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
-                        f"flite=text='This is sentence number {i} from the {voice} voice. We are testing how well the tool "
-                        f"can tell different people apart in a recording.':voice={voice}",
-                        "-ar", str(SR), "-ac", "1", str(path)], check=True)
-        parts.append(audio_analysis.decode_pcm(path))
-    return parts
+    return [_synthesize(f"This is sentence number {i} from the {voice} voice. We are testing how well the tool "
+                        f"can tell different people apart in a recording.", voice) for i in range(count)]
 
 
 def dialogue(*speakers):
