@@ -11,7 +11,7 @@ import { WaveformRibbon } from '../components/WaveformRibbon'
 import { envelope as mockEnvelope } from '../mock/data'
 import { ACTION_LABEL, dur, isCutAction, LOUDNESS_TARGET_LABEL, loudnessSummary, tc } from '../lib/format'
 import { api, ApiError, DecisionConflictError, EXPORT_BITRATES, type ExportFormat, type SessionDetail } from '../lib/api'
-import type { AudioVersion, Chapter, EditDecision, LoudnessTarget, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
+import type { AudioVersion, Chapter, EditDecision, MappedChapter, LoudnessTarget, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
 
 const FALLBACK_WAVE = mockEnvelope(190, 19)
 const PAUSE_THRESHOLD_MS = 400
@@ -86,6 +86,8 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const [chapters, setChapters] = useState<Chapter[]>([])
   const [chapterText, setChapterText] = useState<string | null>(null)
   const [chapterCopied, setChapterCopied] = useState(false)
+  // 成片时间轴上的章节（后端按这版成片的剪辑快照换算），用于导出前核对。
+  const [renderChapters, setRenderChapters] = useState<MappedChapter[] | null>(null)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const [rendering, setRendering] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -458,6 +460,16 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   }
 
   useEffect(() => { wordSelectionRef.current = wordSelection }, [wordSelection])
+
+  const renderVersionId = rendered?.version.id
+  useEffect(() => {
+    if (!renderVersionId || !chapters.length) { setRenderChapters(null); return }
+    let cancelled = false
+    api.versionChapters(sessionId, renderVersionId)
+      .then((list) => { if (!cancelled) setRenderChapters(list) })
+      .catch(() => { if (!cancelled) setRenderChapters(null) })
+    return () => { cancelled = true }
+  }, [sessionId, renderVersionId, chapters])
 
   // 键盘快捷键：空格 播放/暂停，Delete/Backspace 删除选中文字，Esc 取消选择。
   // 输入框、下拉框、打开的对话框里不拦截；处理函数每次渲染更新到 ref，监听只挂一次。
@@ -1165,6 +1177,20 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                   ))}
                 </div>
                 <p className="card__hint">成片 SRT 与章节列表对应剪辑后的时间；原始转写对应剪辑前录音。{chapters.length > 0 && ' 章节已写入 MP3 / M4A。'}</p>
+                {renderChapters && renderChapters.length > 0 && (
+                  <details className="render-chapters">
+                    <summary>成片中的章节 · {renderChapters.length}{chapters.length > renderChapters.length ? `（${chapters.length - renderChapters.length} 个因内容被剪掉已合并）` : ''}</summary>
+                    <ol>
+                      {renderChapters.map((c) => (
+                        <li key={c.id}>
+                          <span className="mono">{tc(c.startMs)}</span>
+                          <span>{c.title}</span>
+                          {c.moved && <span className="render-chapters__note" title={`原起点 ${tc(c.originalStartMs)} 落在被剪掉或重录的部分`}>起点已移到剪切处</span>}
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                )}
                 {chapterText && <textarea className="chapter-copy" aria-label="章节列表" readOnly rows={Math.min(8, chapterText.split('\n').length)} value={chapterText} onFocus={(event) => event.currentTarget.select()} />}
               </div>
             </div>

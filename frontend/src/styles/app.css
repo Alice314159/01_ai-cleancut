@@ -1786,3 +1786,11 @@ select:disabled { opacity: .55; cursor: not-allowed; }
   .demo-badge { font-size: 11px; padding: 1px 8px; }
 }
 .word-selection-bar__actions .btn { gap: 0; }
+
+/* 成片中的章节（导出前核对） */
+.render-chapters { margin-top: 10px; font-size: var(--step--1); }
+.render-chapters summary { cursor: pointer; color: var(--text-dim); }
+.render-chapters ol { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.render-chapters li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.render-chapters .mono { color: var(--accent); font-variant-numeric: tabular-nums; }
+.render-chapters__note { color: var(--sig-provisional); }
