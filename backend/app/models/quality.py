@@ -28,6 +28,11 @@ class AudioQualityReport(Base):
     content_type: Mapped[str] = mapped_column(String, default="unknown")
     content_type_confidence: Mapped[float] = mapped_column(Float, default=0.0)
     content_type_overridden_by_user: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 说话人区分（sherpa-onnx，可选）：unavailable 未安装或无模型 | pending | running | done | failed
+    speaker_analysis_status: Mapped[str] = mapped_column(String, default="unavailable")
+    speaker_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 原始录音时间轴上的分段 [[start_ms, end_ms, speaker], ...]，转写和字幕按时间重叠取说话人
+    speaker_segments: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class QualityEvent(Base):

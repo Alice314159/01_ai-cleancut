@@ -1835,3 +1835,15 @@ select:disabled { opacity: .55; cursor: not-allowed; }
 .pairing-dialog code { color: var(--text); background: var(--surface-2); padding: 1px 6px; border-radius: 5px; }
 .pairing-dialog input { font: inherit; font-size: 18px; letter-spacing: .12em; text-transform: uppercase; color: var(--text); background: var(--ink);
   border: 1px solid var(--hairline); border-radius: var(--radius); padding: 10px 12px; min-width: 0; }
+
+/* 说话人标签：段首标出谁在说；颜色只区分人，不表示任何状态 */
+.speaker-tag { display: inline-flex; align-items: center; gap: 6px; margin: 0 8px 0 0; padding: 1px 8px 1px 6px; border-radius: 999px;
+  font-size: var(--step--1); background: var(--surface-2); border: 1px solid var(--hairline); vertical-align: middle;
+  user-select: none; }
+.speaker-tag::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--speaker-color); }
+.speaker-tag--0 { --speaker-color: #6f8df0; }
+.speaker-tag--1 { --speaker-color: #e39a4a; }
+.speaker-tag--2 { --speaker-color: #49b59c; }
+.speaker-tag--3 { --speaker-color: #c46fc9; }
+.speaker-tag--4 { --speaker-color: #b8a33b; }
+.speaker-tag--5 { --speaker-color: #d06a6a; }

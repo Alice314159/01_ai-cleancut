@@ -1,7 +1,9 @@
 """Export a completed transcript on its original, uncut audio timeline."""
 import re
+from types import SimpleNamespace
 
 from app.models import TranscriptToken, TranscriptionJob
+from app.services import diarization
 
 
 def content(tokens):
@@ -17,20 +19,53 @@ def timestamp(ms):
 
 
 def subtitle_cues(tokens):
+    """切字幕条；换人处必定另起一条，换人后的第一条前面加“说话人 X：”。"""
+    previous = None
+    for start, end, text, speaker in _cues(tokens):
+        if speaker is not None and speaker != previous:
+            text = f"{diarization.speaker_name(speaker)}：{text}"
+        previous = speaker if speaker is not None else previous
+        yield start, end, text
+
+
+def _cues(tokens):
     group = []
     end = 0
     for token in tokens:
-        if group and token.start_ms >= end and (
+        speaker = getattr(token, "speaker", None)
+        changed = bool(group) and speaker is not None and speaker != getattr(group[-1], "speaker", None)
+        if group and (changed or token.start_ms >= end and (
             token.start_ms - end >= 800 or token.end_ms - group[0].start_ms > 5000
             or len(content(group)) + len(token.text) > 42
             or re.search(r'[。！？.!?]["”’\)]?$', content(group))
-        ):
-            yield group[0].start_ms, end, ' '.join(content(group).split())
+        )):
+            yield group[0].start_ms, end, ' '.join(content(group).split()), getattr(group[0], "speaker", None)
             group = []
         group.append(token)
         end = max(t.end_ms for t in group)
     if group:
-        yield group[0].start_ms, end, ' '.join(content(group).split())
+        yield group[0].start_ms, end, ' '.join(content(group).split()), getattr(group[0], "speaker", None)
+
+
+def turns(tokens):
+    """TXT 导出：有说话人时按轮次分段，每段前标说话人。"""
+    paragraphs, current, speaker = [], [], None
+    for token in tokens:
+        if current and token.speaker is not None and token.speaker != speaker:
+            paragraphs.append((speaker, current))
+            current = []
+        if token.speaker is not None:
+            speaker = token.speaker
+        current.append(token)
+    if current:
+        paragraphs.append((speaker, current))
+    return '\n\n'.join(f"{diarization.speaker_name(s)}：{content(group)}" if s is not None else content(group)
+                       for s, group in paragraphs) + '\n'
+
+
+def with_speakers(db, session_id, tokens):
+    speakers = diarization.label_tokens(diarization.session_segments(db, session_id), tokens)
+    return [SimpleNamespace(text=t.text, start_ms=t.start_ms, end_ms=t.end_ms, speaker=s) for t, s in zip(tokens, speakers)]
 
 
 def export(db, session, job_id, format):
@@ -41,8 +76,11 @@ def export(db, session, job_id, format):
         for t in tokens
     ) or any(a.start_ms > b.start_ms for a, b in zip(tokens, tokens[1:])):
         raise ValueError('缺少有效的真实转写，或转写已更新，请刷新后重试')
+    tokens = with_speakers(db, session.id, tokens)
     if format == 'txt':
-        return content(tokens) + '\n'
+        if all(t.speaker is None for t in tokens):
+            return content(tokens) + '\n'
+        return turns(tokens)
     return ''.join(f'{i}\n{timestamp(start)} --> {timestamp(end)}\n{text}\n\n'
                    for i, (start, end, text) in enumerate(subtitle_cues(tokens), 1))
 
@@ -56,11 +94,11 @@ def snapshot(db, session_id):
         t.job_id != job.id or t.end_ms is None or t.start_ms < 0 or t.end_ms <= t.start_ms for t in tokens
     ):
         return None
-    return [dict(text=t.text, start_ms=t.start_ms, end_ms=t.end_ms, job_id=t.job_id) for t in tokens]
+    speakers = diarization.label_tokens(diarization.session_segments(db, session_id), tokens)
+    return [dict(text=t.text, start_ms=t.start_ms, end_ms=t.end_ms, job_id=t.job_id, speaker=s) for t, s in zip(tokens, speakers)]
 
 
 def export_render(output, version):
-    from types import SimpleNamespace
     if any(d['action'] == 'REPLACE_AUDIO' and d['accepted'] for d in output.decisions):
         raise ValueError('成片包含重录片段，请等待成片转写完成或点击重试后导出字幕')
     if not output.transcript_snapshot:
@@ -79,7 +117,7 @@ def export_render(output, version):
         start_ms = round(shifted(start) * 1000 / rate)
         end_ms = min(version.duration_ms, round(shifted(end) * 1000 / rate))
         if end_ms > start_ms:
-            words.append(SimpleNamespace(text=token['text'], start_ms=start_ms, end_ms=end_ms))
+            words.append(SimpleNamespace(text=token['text'], start_ms=start_ms, end_ms=end_ms, speaker=token.get('speaker')))
     if not words:
         raise ValueError('成片中没有可导出的转写文字')
     return ''.join(f'{i}\n{timestamp(start)} --> {timestamp(end)}\n{text}\n\n'

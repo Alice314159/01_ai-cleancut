@@ -167,6 +167,9 @@ export interface AudioQualityReport {
   contentType: ContentType
   contentTypeConfidence: number
   contentTypeOverriddenByUser: boolean
+  /** 说话人区分（本机模型，可选）：unavailable 未安装 | pending | running | done | failed */
+  speakerAnalysisStatus?: 'unavailable' | 'pending' | 'running' | 'done' | 'failed'
+  speakerCount?: number | null
 }
 
 /** 语音保护指标（ADR-044）。复合判据，不以噪声下降单独判成功。 */
@@ -238,6 +241,8 @@ export interface TranscriptToken {
   startMs: number
   state: 'committed' | 'provisional'
   cut?: boolean
+  /** 0 起的说话人编号（说话人 A、B…）；没有区分结果或只有一人时为空 */
+  speaker?: number | null
 }
 
 export interface RenderOutput {

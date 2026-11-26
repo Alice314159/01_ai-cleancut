@@ -10,7 +10,7 @@ import { needsManagedDownload, saveFile } from '../lib/saveFile'
 import { WarningList } from '../components/WarningList'
 import { WaveformRibbon } from '../components/WaveformRibbon'
 import { envelope as mockEnvelope } from '../mock/data'
-import { ACTION_LABEL, dur, isCutAction, LOUDNESS_TARGET_LABEL, loudnessSummary, tc } from '../lib/format'
+import { ACTION_LABEL, dur, isCutAction, LOUDNESS_TARGET_LABEL, loudnessSummary, speakerName, tc } from '../lib/format'
 import { api, ApiError, DecisionConflictError, EXPORT_BITRATES, type ExportFormat, type SessionDetail } from '../lib/api'
 import type { AudioVersion, Chapter, EditDecision, MappedChapter, LoudnessTarget, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
 
@@ -656,7 +656,8 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
     transcript.forEach((token, index) => {
       const previous = transcript[index - 1]
       const gap = previous?.endMs != null ? token.startMs - previous.endMs : 0
-      if (!paragraphs.length || gap >= 1500 || chapterMarkers.has(token.id) || (length >= 120 && SENTENCE_END_RE.test(previous?.text ?? '')) || length >= 360) {
+      const speakerChanged = token.speaker != null && previous?.speaker != null && token.speaker !== previous.speaker
+      if (!paragraphs.length || gap >= 1500 || speakerChanged || chapterMarkers.has(token.id) || (length >= 120 && SENTENCE_END_RE.test(previous?.text ?? '')) || length >= 360) {
         paragraphs.push([]); length = 0
       }
       paragraphs[paragraphs.length - 1].push({ token, index })
@@ -872,7 +873,12 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
               </div>
             )}
             {transcript.length > 0 && <div className="transcript">
-              {transcriptParagraphs.map((paragraph) => <p className="transcript-paragraph" key={paragraph[0].token.id}>{paragraph.map(({ token, index }) => {
+              {transcriptParagraphs.map((paragraph, paragraphIndex) => {
+                const speaker = paragraph[0].token.speaker
+                const previousSpeaker = paragraphIndex > 0 ? transcriptParagraphs[paragraphIndex - 1][0].token.speaker : null
+                return <p className="transcript-paragraph" key={paragraph[0].token.id}>
+                {speaker != null && speaker !== previousSpeaker && <span className={`speaker-tag speaker-tag--${speaker % 6}`}>{speakerName(speaker)}</span>}
+                {paragraph.map(({ token, index }) => {
                 const prev = transcript[index - 1]
                 const gapMs = prev?.jobId && prev.endMs != null && token.jobId && token.endMs != null
                   ? token.startMs - prev.endMs : 0
@@ -927,7 +933,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                     ) : <span>{token.text}</span>}
                   </span>
                 )
-              })}</p>)}
+              })}</p>})}
             </div>}
             {wordSelection && (
               <>

@@ -1,4 +1,5 @@
 """内容类型估计：音乐 / 噪声 / 静音用合成信号，人声用 ffmpeg 自带的 flite 语音合成（不可用时跳过）。"""
+import atexit
 import functools
 import shutil
 import subprocess
@@ -31,10 +32,8 @@ TEXT = ("So the question I keep getting is how do you edit a podcast quickly. Ho
 _CACHE_DIR = tempfile.mkdtemp(prefix="cleancut-flite-")
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _cleanup_cache():
-    yield
-    shutil.rmtree(_CACHE_DIR, ignore_errors=True)
+# 其它测试模块（test_diarization.py）也复用这些合成函数，所以在进程退出时才清理，而不是本模块结束时
+atexit.register(shutil.rmtree, _CACHE_DIR, ignore_errors=True)
 
 
 @functools.lru_cache(maxsize=None)
@@ -139,6 +138,6 @@ def test_single_voice_is_never_called_multi(tmp_path, voice):
 
 @needs_flite
 def test_similar_voices_stay_undetermined_rather_than_single(tmp_path):
-    """已知局限：两个音高接近的同性别说话人分不出来，结果保持“人声（未区分人数）”，不冒称单人。"""
+    """音高判断的局限：两个音高接近的同性别说话人分不出来，保持“人声（未区分人数）”、不冒称单人；装了说话人区分模型后由后台分析修正（见 test_diarization.py）。"""
     result = audio_analysis.classify_content(dialogue(voice_lines(tmp_path, "awb"), voice_lines(tmp_path, "rms")))
     assert result.content_type == "speech"

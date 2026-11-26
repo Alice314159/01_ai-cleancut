@@ -29,3 +29,9 @@ ASR_LOCAL_FILES_ONLY = os.environ.get("CLEANCUT_ASR_OFFLINE", "0") == "1"
 
 # 录制中实时提示（可选）：用较小的模型每隔一段时间转写最近一段，提示重复/口吃/语气词
 LIVE_HINT_MODEL = os.environ.get("CLEANCUT_LIVE_HINT_MODEL", "tiny")
+
+# 说话人区分（可选）：sherpa-onnx + 分段模型 + 声纹模型，全部在本机 CPU 上运行。
+# 模型用 scripts/prepare_diarization.py 下载到这个目录；没装或没下载时退回音高判断。
+DIARIZATION_MODEL_DIR = Path(os.environ.get("CLEANCUT_DIARIZATION_DIR", str(ASR_MODEL_DIR / "diarization"))).expanduser()
+# 聚类阈值：越小越容易把同一个人拆成两人，越大越容易把两个人并成一人。
+DIARIZATION_THRESHOLD = float(os.environ.get("CLEANCUT_DIARIZATION_THRESHOLD", "0.5"))

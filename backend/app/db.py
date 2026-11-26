@@ -92,6 +92,15 @@ def init_db() -> None:
         if "job_id" not in columns:
             connection.execute(text("ALTER TABLE transcript_tokens ADD COLUMN job_id VARCHAR"))
 
+    columns = {column["name"] for column in inspect(engine).get_columns("audio_quality_reports")}
+    with engine.begin() as connection:
+        if "speaker_analysis_status" not in columns:
+            connection.execute(text("ALTER TABLE audio_quality_reports ADD COLUMN speaker_analysis_status VARCHAR NOT NULL DEFAULT 'unavailable'"))
+        if "speaker_count" not in columns:
+            connection.execute(text("ALTER TABLE audio_quality_reports ADD COLUMN speaker_count INTEGER"))
+        if "speaker_segments" not in columns:
+            connection.execute(text("ALTER TABLE audio_quality_reports ADD COLUMN speaker_segments JSON"))
+
     columns = {column["name"] for column in inspect(engine).get_columns("render_outputs")}
     with engine.begin() as connection:
         if "transcript_snapshot" not in columns:

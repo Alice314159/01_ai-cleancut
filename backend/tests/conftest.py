@@ -47,6 +47,8 @@ def isolated_backend(tmp_path, monkeypatch):
     # 数据库已经 drop 之后继续写入，产生跨测试的竞态。默认关闭，需要真实验证自动
     # 转写触发的测试自己再打开。
     monkeypatch.setattr(transcription_module, "dependency_available", lambda: False)
+    # 说话人区分同理：本机下载过模型也默认不用，需要的测试自己指向模型目录。
+    monkeypatch.setattr(config_module, "DIARIZATION_MODEL_DIR", tmp_path / "no-diarization-models")
 
     from app import models  # noqa: F401  确保所有模型都注册到 Base.metadata 上
 

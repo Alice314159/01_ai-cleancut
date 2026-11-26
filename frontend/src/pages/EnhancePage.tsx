@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Card, Chip, KV } from '../components/Bits'
 import { WarningList } from '../components/WarningList'
-import { CONTENT_TYPE_LABEL, GRADE_LABEL, db } from '../lib/format'
+import { CONTENT_TYPE_LABEL, GRADE_LABEL, db, speakerSummary } from '../lib/format'
 import { api } from '../lib/api'
 import { isBoolean, oneOf, usePref } from '../lib/prefs'
 import type { AudioQualityReport, AudioVersion, EnhancementJob, RoleAssignment } from '../types/api'
@@ -73,6 +73,17 @@ export function EnhancePage({
     void load()
     return () => { cancelled = true; window.clearTimeout(timer) }
   }, [sessionId, onDataChange, retry])
+
+  // 说话人区分在后台跑（约录音时长的 1/8），跑完后刷新“说话人 / 素材类型”
+  const speakerRunning = quality?.speakerAnalysisStatus === 'pending' || quality?.speakerAnalysisStatus === 'running'
+  useEffect(() => {
+    if (!speakerRunning) return
+    let cancelled = false
+    const timer = window.setInterval(() => {
+      void api.getQuality(sessionId).then((report) => { if (!cancelled && report) setQuality(report) }).catch(() => {})
+    }, 3000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [speakerRunning, sessionId])
 
   const jobId = job?.id
   const jobStatus = job?.status
@@ -169,6 +180,9 @@ export function EnhancePage({
     RENDER_SOURCE: '剪辑试听／渲染', EXPORT_SOURCE: '导出', REFERENCE_SOURCE: '参考',
   }
 
+  const speakers = speakerSummary(quality.speakerAnalysisStatus, quality.speakerCount)
+  const speakerModel = !!quality.speakerAnalysisStatus && quality.speakerAnalysisStatus !== 'unavailable'
+
   return (
     <div className="enhance-page">
       {pageHead}
@@ -183,13 +197,16 @@ export function EnhancePage({
           </dl>
           <div className="quality-context">
             <span title={`类型置信度 ${quality.contentTypeConfidence.toFixed(2)}`}>素材类型 <strong>{CONTENT_TYPE_LABEL[quality.contentType] ?? quality.contentType}</strong></span>
+            {speakers && <span title="本机说话人区分模型判断">说话人 <strong>{speakers}</strong></span>}
             <span>识别到的噪声 <strong>{quality.noiseTypes.join('、') || '无'}</strong></span>
           </div>
           {(quality.contentType === 'music_dominant' || quality.contentType === 'speech_with_music') && (
             <p className="card__hint declip-hint">检测到{quality.contentType === 'music_dominant' ? '以音乐为主' : '背景音乐'}：降噪会把音乐当作噪声削弱，建议选轻度或跳过降噪。</p>
           )}
           {quality.contentType === 'no_speech' && <p className="card__hint declip-hint">没有检测到人声，请确认录音或导入的文件是否正确。</p>}
-          <p className="card__hint quality-footnote">以上为信号分析估算值（素材类型按音量节奏与频谱特征判断；音高明显不同的多人会标为多人对话，音高接近的多人分不出），结合试听判断音质。</p>
+          <p className="card__hint quality-footnote">{speakerModel
+            ? '以上为信号分析估算值；说话人人数由本机声纹模型判断，多人对话会在转写中标出“说话人 A / B”。请结合试听判断音质。'
+            : '以上为信号分析估算值（素材类型按音量节奏与频谱特征判断；音高明显不同的多人会标为多人对话，音高接近的多人分不出——安装说话人区分模型后可区分），结合试听判断音质。'}</p>
         </Card>
 
         <Card title="音质增强" hint="可修复破音（削波）并降噪，处理后对比原音与结果。">

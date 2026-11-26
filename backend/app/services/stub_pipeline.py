@@ -20,7 +20,7 @@ from app.models import (
     VoiceProtectionMetric,
 )
 from app.models import Warning as WarningModel
-from app.services import audio_analysis, storage, transcription
+from app.services import audio_analysis, diarization, storage, transcription
 from app.ws.connection_manager import manager
 
 # 终态化成功后自动排队的转写任务；保留强引用避免任务在完成前被 GC。
@@ -109,6 +109,8 @@ async def on_capture_stop(session_id: str) -> None:
         samples = await asyncio.to_thread(audio_analysis.decode_pcm, Path(storage.raw_chunk_path(session_id)))
         metrics = await asyncio.to_thread(audio_analysis.analyze_samples, samples)
         content = await asyncio.to_thread(audio_analysis.classify_content, samples)
+        # 有说话人区分模型时，人声素材在后台再用模型数一遍人数、标出谁在说话
+        speaker_analysis = diarization.available() and content.content_type in diarization.SPEECH_TYPES
         duration_ms = int(len(samples) / audio_analysis.ANALYSIS_SAMPLE_RATE * 1000)
         original = AudioVersion(
             session_id=session_id, version_type="original", label="原始录音",
@@ -130,6 +132,7 @@ async def on_capture_stop(session_id: str) -> None:
             reverb_score=metrics.reverb_score, speech_coverage=metrics.speech_coverage,
             silence_coverage=metrics.silence_coverage, noise_types=metrics.noise_types,
             content_type=content.content_type, content_type_confidence=content.confidence, content_type_overridden_by_user=False,
+            speaker_analysis_status="pending" if speaker_analysis else "unavailable",
         ))
         session.clock_drift = clock_drift_report(len(samples), session.client_recorded_ms)
         if session.clock_drift and abs(session.clock_drift["clock_drift_ppm"]) > CLOCK_DRIFT_WARN_PPM:
@@ -148,6 +151,8 @@ async def on_capture_stop(session_id: str) -> None:
         db.commit()
         await manager.send_json(session_id, {"type": "stage", "stage": "finalized", "status": "READY"})
         _auto_start_transcription(session_id, original.id)
+        if speaker_analysis:
+            schedule_speaker_analysis(session_id)
     except Exception as exc:
         db.rollback()
         session = db.get(RecordingSession, session_id)
@@ -164,6 +169,21 @@ async def on_capture_stop(session_id: str) -> None:
             await manager.send_json(session_id, {"type": "stage", "stage": "finalized", "status": "FAILED"})
     finally:
         db.close()
+
+
+_speaker_tasks: set[asyncio.Task] = set()
+
+
+def schedule_speaker_analysis(session_id: str) -> asyncio.Task:
+    task = asyncio.create_task(asyncio.to_thread(diarization.analyze_session, session_id))
+    _speaker_tasks.add(task)
+    task.add_done_callback(_speaker_tasks.discard)
+    return task
+
+
+def recover_speaker_analysis() -> None:
+    for session_id in diarization.recover_interrupted():
+        schedule_speaker_analysis(session_id)
 
 
 def _auto_start_transcription(session_id: str, source_version_id: str) -> None:

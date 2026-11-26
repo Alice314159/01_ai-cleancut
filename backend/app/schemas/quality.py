@@ -17,6 +17,8 @@ class AudioQualityReportOut(CamelModel):
     content_type: str
     content_type_confidence: float
     content_type_overridden_by_user: bool
+    speaker_analysis_status: str = "unavailable"
+    speaker_count: int | None = None
 
 
 class QualityEventOut(CamelModel):

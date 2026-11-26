@@ -13,7 +13,7 @@ from app.schemas.audio import AudioVersionOut
 from app.schemas.decision import BatchDecisionsIn, RestoreDecisionsIn
 from app.schemas.render import CreateManualDecisionIn, RenderOutputOut, RenderOptionsIn, SuggestPausesIn
 from app.schemas.common import CamelModel
-from app.services import pause_suggestions, rendering, suggestions, transcript_export, retakes, render_transcription
+from app.services import diarization, pause_suggestions, rendering, suggestions, transcript_export, retakes, render_transcription
 from app.schemas.transcription import CreateTranscriptionIn, TranscriptionJobOut
 
 router = APIRouter(prefix="/api/sessions/{session_id}", tags=["review"])
@@ -72,7 +72,9 @@ def confirm_decisions(session_id: str, body: BatchDecisionsIn | None = None, db:
 def get_transcript(session_id: str, db: Session = Depends(get_db)):
     if db.get(RecordingSession, session_id) is None:
         raise HTTPException(status_code=404, detail="session not found")
-    return db.query(TranscriptToken).filter_by(session_id=session_id).order_by(TranscriptToken.seq).all()
+    tokens = db.query(TranscriptToken).filter_by(session_id=session_id).order_by(TranscriptToken.seq).all()
+    speakers = diarization.label_tokens(diarization.session_segments(db, session_id), tokens)
+    return [TranscriptTokenOut.model_validate(t).model_copy(update={"speaker": s}) for t, s in zip(tokens, speakers)]
 
 
 @router.post("/decisions", response_model=EditDecisionOut, status_code=201)

@@ -102,3 +102,22 @@ export const GRADE_LABEL: Record<string, string> = {
   POOR: '差',
   UNUSABLE: '不可用',
 }
+
+/** 说话人编号 → “说话人 A”；与后端导出的字幕/文本一致。 */
+export function speakerName(speaker: number): string {
+  let letters = ''
+  let n = speaker
+  for (;;) {
+    letters = String.fromCharCode(65 + (n % 26)) + letters
+    n = Math.floor(n / 26) - 1
+    if (n < 0) return `说话人 ${letters}`
+  }
+}
+
+/** 质量报告里“说话人”一栏；没有模型时返回 null（不显示）。 */
+export function speakerSummary(status?: string, count?: number | null): string | null {
+  if (status === 'pending' || status === 'running') return '正在区分…'
+  if (status === 'failed') return '区分失败'
+  if (status === 'done') return count && count > 0 ? `${count} 位` : '未检测到'
+  return null
+}

@@ -9,3 +9,4 @@ class TranscriptTokenOut(CamelModel):
     start_ms: int
     state: str  # committed | provisional
     cut: bool | None = None
+    speaker: int | None = None  # 0 起的说话人编号（A、B…），没有说话人区分结果时为空
