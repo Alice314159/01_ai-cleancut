@@ -1847,3 +1847,11 @@ select:disabled { opacity: .55; cursor: not-allowed; }
 .speaker-tag--3 { --speaker-color: #c46fc9; }
 .speaker-tag--4 { --speaker-color: #b8a33b; }
 .speaker-tag--5 { --speaker-color: #d06a6a; }
+.speaker-tag.speaker-menu__option { cursor: pointer; font: inherit; font-size: var(--step--1); color: var(--text); min-height: 36px; padding: 4px 12px 4px 10px; }
+.speaker-tag.speaker-menu__option:hover { border-color: var(--speaker-color); }
+.speaker-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--hairline); margin-top: 8px; width: 100%; }
+.speaker-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; }
+.speaker-list__row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: center; }
+.speaker-list__row input { font: inherit; font-size: var(--step--1); color: var(--text); background: var(--ink); border: 1px solid var(--hairline);
+  border-radius: var(--radius); padding: 7px 10px; min-width: 0; width: 100%; color-scheme: dark; }
+.speaker-list__row input:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }

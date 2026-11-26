@@ -100,6 +100,8 @@ def init_db() -> None:
             connection.execute(text("ALTER TABLE audio_quality_reports ADD COLUMN speaker_count INTEGER"))
         if "speaker_segments" not in columns:
             connection.execute(text("ALTER TABLE audio_quality_reports ADD COLUMN speaker_segments JSON"))
+        if "speaker_names" not in columns:
+            connection.execute(text("ALTER TABLE audio_quality_reports ADD COLUMN speaker_names JSON"))
 
     columns = {column["name"] for column in inspect(engine).get_columns("render_outputs")}
     with engine.begin() as connection:

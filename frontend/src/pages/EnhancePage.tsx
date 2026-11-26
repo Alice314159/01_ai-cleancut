@@ -180,7 +180,7 @@ export function EnhancePage({
     RENDER_SOURCE: '剪辑试听／渲染', EXPORT_SOURCE: '导出', REFERENCE_SOURCE: '参考',
   }
 
-  const speakers = speakerSummary(quality.speakerAnalysisStatus, quality.speakerCount)
+  const speakers = speakerSummary(quality.speakerAnalysisStatus, quality.speakerCount, quality.speakerModelAvailable)
   const speakerModel = !!quality.speakerAnalysisStatus && quality.speakerAnalysisStatus !== 'unavailable'
 
   return (

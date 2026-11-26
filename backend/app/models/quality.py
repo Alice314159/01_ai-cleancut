@@ -33,6 +33,8 @@ class AudioQualityReport(Base):
     speaker_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 原始录音时间轴上的分段 [[start_ms, end_ms, speaker], ...]，转写和字幕按时间重叠取说话人
     speaker_segments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 用户给说话人起的名字 {"0": "主持人"}，按编号保存；重新分析后编号可能对应不同的人
+    speaker_names: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class QualityEvent(Base):

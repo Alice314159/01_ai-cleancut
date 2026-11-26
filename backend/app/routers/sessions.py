@@ -366,7 +366,8 @@ def get_quality_report(session_id: str, db: Session = Depends(get_db)):
     report = db.get(AudioQualityReport, session_id)
     if report is None:
         raise HTTPException(status_code=404, detail="quality report not ready yet")
-    return report
+    from app.routers.speakers import quality_out
+    return quality_out(report)
 
 
 @router.get("/{session_id}/warnings", response_model=list[WarningOut])

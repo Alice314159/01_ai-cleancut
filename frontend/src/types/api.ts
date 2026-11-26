@@ -170,6 +170,12 @@ export interface AudioQualityReport {
   /** 说话人区分（本机模型，可选）：unavailable 未安装 | pending | running | done | failed */
   speakerAnalysisStatus?: 'unavailable' | 'pending' | 'running' | 'done' | 'failed'
   speakerCount?: number | null
+  /** 用户起的名字，按编号：{ "0": "主持人" } */
+  speakerNames?: Record<string, string> | null
+  /** 本机现在是否装好了说话人区分模型（可以开始 / 重新分析） */
+  speakerModelAvailable?: boolean
+  /** 全程分段里出现的说话人编号；为空表示不能手动更正 */
+  speakers?: number[]
 }
 
 /** 语音保护指标（ADR-044）。复合判据，不以噪声下降单独判成功。 */

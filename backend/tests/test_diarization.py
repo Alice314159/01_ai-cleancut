@@ -255,3 +255,94 @@ async def test_real_pipeline_refines_similar_voices_and_labels_turns(isolated_ba
         start += len(line)
     labels = [diarization.speaker_at(segments, s * 1000 // SR + 500, e * 1000 // SR - 500) for s, e in bounds]
     assert labels == [0, 1, 0, 1, 0, 1]
+
+
+# ─────────────── 起名字、手动更正、重新分析 ───────────────
+
+def test_fold_minor_merges_blips_into_nearest_speaker():
+    raw = [seg(0, 20000, 0), seg(20000, 21000, 2), seg(23000, 43000, 1), seg(43000, 43500, 2)]
+    folded = diarization.fold_minor(raw)
+    assert {s.speaker for s in folded} == {0, 1}
+    assert folded == [seg(0, 21000, 0), seg(23000, 43500, 1)]
+    single = [seg(0, 1000, 0)]                      # 都不够格（太短）时原样返回
+    assert diarization.fold_minor(single) == single
+
+
+def test_assign_splits_and_merges_without_renumbering():
+    segments = [[0, 4000, 0], [4000, 8000, 1]]
+    assert diarization.assign(segments, 3000, 5000, 1) == [[0, 3000, 0], [3000, 8000, 1]]
+    assert diarization.assign(segments, 1000, 2000, 2) == [[0, 1000, 0], [1000, 2000, 2], [2000, 4000, 0], [4000, 8000, 1]]
+    assert diarization.speakers_in(segments) == [0, 1]
+
+
+def test_speaker_name_prefers_custom_name():
+    assert diarization.speaker_name(1, {"1": "嘉宾"}) == "嘉宾"
+    assert diarization.speaker_name(0, {"1": "嘉宾"}) == "说话人 A"
+
+
+def test_rename_speakers_used_in_api_and_exports(client, recording, isolated_backend):
+    session_id = recording[0]
+    add_report(isolated_backend, session_id, speaker_analysis_status="done", speaker_count=2,
+               speaker_segments=[[0, 1200, 0], [1500, 2600, 1]])
+    job_id = add_transcript(isolated_backend, session_id, TRANSCRIPT)
+    response = client.put(f"/api/sessions/{session_id}/speakers/names", json={"names": {"0": "  主持人 ", "1": "嘉宾"}})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["speakerNames"] == {"0": "主持人", "1": "嘉宾"} and body["speakers"] == [0, 1]
+    txt = client.get(f"/api/sessions/{session_id}/transcript/export", params={"transcriptionJobId": job_id, "format": "txt"}).text
+    assert txt == "主持人：你好欢迎\n\n嘉宾：谢谢邀请\n"
+    # 清空某个名字即恢复默认；重名、过长、非法编号被拒绝
+    assert client.put(f"/api/sessions/{session_id}/speakers/names", json={"names": {"0": "", "1": "嘉宾"}}).json()["speakerNames"] == {"1": "嘉宾"}
+    assert client.put(f"/api/sessions/{session_id}/speakers/names", json={"names": {"0": "甲", "1": "甲"}}).status_code == 422
+    assert client.put(f"/api/sessions/{session_id}/speakers/names", json={"names": {"0": "长" * 21}}).status_code == 422
+    assert client.put(f"/api/sessions/{session_id}/speakers/names", json={"names": {"x": "甲"}}).status_code == 422
+
+
+def test_assign_speaker_corrects_labels(client, recording, isolated_backend):
+    session_id = recording[0]
+    add_report(isolated_backend, session_id, speaker_analysis_status="done", speaker_count=2,
+               speaker_segments=[[0, 1200, 0], [1500, 2600, 1]], content_type="multi_speaker_speech")
+    add_transcript(isolated_backend, session_id, TRANSCRIPT)
+    url = f"/api/sessions/{session_id}/speakers/assign"
+    # “谢谢”其实是 A 说的
+    assert client.post(url, json={"startMs": 1600, "endMs": 2000, "speaker": 0}).status_code == 200
+    assert [t["speaker"] for t in client.get(f"/api/sessions/{session_id}/transcript").json()] == [0, 0, 0, 1]
+    # 新说话人（编号 = 现有最大 + 1）
+    body = client.post(url, json={"startMs": 2000, "endMs": 2400, "speaker": 2}).json()
+    assert body["speakers"] == [0, 1, 2] and body["speakerCount"] == 3
+    assert client.post(url, json={"startMs": 0, "endMs": 100, "speaker": 9}).status_code == 422
+    assert client.post(url, json={"startMs": 500, "endMs": 100, "speaker": 0}).status_code == 422
+    assert client.post(url, json={"startMs": 0, "endMs": 999999, "speaker": 0}).status_code == 422
+
+
+def test_assign_making_single_speaker_multi_updates_type(client, recording, isolated_backend):
+    session_id = recording[0]
+    add_report(isolated_backend, session_id, speaker_analysis_status="done", speaker_count=1,
+               speaker_segments=[[0, 3000, 0]], content_type="single_speaker_speech")
+    add_transcript(isolated_backend, session_id, TRANSCRIPT)
+    assert all(t["speaker"] is None for t in client.get(f"/api/sessions/{session_id}/transcript").json())
+    body = client.post(f"/api/sessions/{session_id}/speakers/assign", json={"startMs": 1500, "endMs": 2600, "speaker": 1}).json()
+    assert body["contentType"] == "multi_speaker_speech" and body["speakerCount"] == 2
+    assert [t["speaker"] for t in client.get(f"/api/sessions/{session_id}/transcript").json()] == [0, 0, 1, 1]
+
+
+def test_assign_requires_segments(client, recording, isolated_backend):
+    session_id = recording[0]
+    add_report(isolated_backend, session_id, speaker_analysis_status="running")
+    assert client.post(f"/api/sessions/{session_id}/speakers/assign", json={"startMs": 0, "endMs": 100, "speaker": 0}).status_code == 409
+    assert client.post(f"/api/sessions/nope/speakers/assign", json={"startMs": 0, "endMs": 100, "speaker": 0}).status_code == 404
+
+
+def test_reanalyze(client, recording, isolated_backend, monkeypatch):
+    session_id = recording[0]
+    add_report(isolated_backend, session_id, speaker_analysis_status="unavailable")
+    url = f"/api/sessions/{session_id}/speakers/analyze"
+    assert client.post(url).status_code == 503                       # 没装模型
+    assert client.get(f"/api/sessions/{session_id}/quality").json()["speakerModelAvailable"] is False
+    monkeypatch.setattr(diarization, "available", lambda: True)
+    calls = []
+    monkeypatch.setattr(stub_pipeline, "schedule_speaker_analysis", calls.append)
+    response = client.post(url)
+    assert response.status_code == 202 and response.json()["speakerAnalysisStatus"] == "pending"
+    assert calls == [session_id]
+    assert client.post(url).status_code == 409                       # 已在排队

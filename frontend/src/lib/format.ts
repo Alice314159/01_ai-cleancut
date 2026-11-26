@@ -104,7 +104,9 @@ export const GRADE_LABEL: Record<string, string> = {
 }
 
 /** 说话人编号 → “说话人 A”；与后端导出的字幕/文本一致。 */
-export function speakerName(speaker: number): string {
+export function speakerName(speaker: number, names?: Record<string, string> | null): string {
+  const custom = names?.[String(speaker)]
+  if (custom) return custom
   let letters = ''
   let n = speaker
   for (;;) {
@@ -115,7 +117,8 @@ export function speakerName(speaker: number): string {
 }
 
 /** 质量报告里“说话人”一栏；没有模型时返回 null（不显示）。 */
-export function speakerSummary(status?: string, count?: number | null): string | null {
+export function speakerSummary(status?: string, count?: number | null, modelAvailable?: boolean): string | null {
+  if (status === 'unavailable' && modelAvailable) return '未区分（可在剪辑页开始）'
   if (status === 'pending' || status === 'running') return '正在区分…'
   if (status === 'failed') return '区分失败'
   if (status === 'done') return count && count > 0 ? `${count} 位` : '未检测到'

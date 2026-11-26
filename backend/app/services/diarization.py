@@ -129,6 +129,71 @@ def excerpts(samples: np.ndarray, sample_rate: int, seconds: float = 40.0, count
     return np.concatenate(parts[:-1])
 
 
+def _significant(totals: dict[int, float]) -> set[int]:
+    speech = sum(totals.values())
+    return {k for k, t in totals.items() if speech > 0 and t / speech >= MIN_SPEAKER_SHARE and t >= MIN_SPEAKER_SECONDS}
+
+
+def fold_minor(segments: list[Segment]) -> list[Segment]:
+    """
+    把不够格的“说话人”（咳嗽、笑声、聚类抖动，见 MIN_SPEAKER_*）并入时间上最近的正式说话人，
+    转写里就不会冒出只出现一两次的“说话人 C”，标出的人数与报告的人数一致。
+    """
+    totals: dict[int, float] = {}
+    for x in segments:
+        totals[x.speaker] = totals.get(x.speaker, 0.0) + (x.end_ms - x.start_ms) / 1000
+    keep = _significant(totals)
+    if not keep or len(keep) == len(totals):
+        return segments
+    previous: list[Segment | None] = []
+    last = None
+    for x in segments:
+        previous.append(last)
+        if x.speaker in keep:
+            last = x
+    following: list[Segment | None] = [None] * len(segments)
+    last = None
+    for i in range(len(segments) - 1, -1, -1):
+        following[i] = last
+        if segments[i].speaker in keep:
+            last = segments[i]
+    out = []
+    for x, before, after in zip(segments, previous, following):
+        if x.speaker not in keep:
+            gap_before = x.start_ms - before.end_ms if before else None
+            gap_after = after.start_ms - x.end_ms if after else None
+            near = before if gap_after is None or (gap_before is not None and gap_before <= gap_after) else after
+            x = Segment(x.start_ms, x.end_ms, near.speaker)
+        out.append(x)
+    return normalize(out)
+
+
+def assign(segments, start_ms: int, end_ms: int, speaker: int) -> list[list[int]]:
+    """手动更正：把 [start_ms, end_ms) 改成 speaker。不重新编号，已起的名字跟着编号走。"""
+    pieces = []
+    for a, b, who in segments:
+        if b <= start_ms or a >= end_ms:
+            pieces.append([a, b, who])
+            continue
+        if a < start_ms:
+            pieces.append([a, start_ms, who])
+        if b > end_ms:
+            pieces.append([end_ms, b, who])
+    pieces.append([start_ms, end_ms, speaker])
+    pieces.sort()
+    merged: list[list[int]] = []
+    for a, b, who in pieces:
+        if merged and merged[-1][2] == who and a - merged[-1][1] < 300:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b, who])
+    return merged
+
+
+def speakers_in(segments) -> list[int]:
+    return sorted({who for _, _, who in segments or ()})
+
+
 def summarize(segments: list[Segment]) -> SpeakerCount:
     totals: dict[int, float] = {}
     for s in segments:
@@ -182,6 +247,13 @@ def session_segments(db, session_id: str):
     return report.speaker_segments or None
 
 
+def session_names(db, session_id: str) -> dict:
+    from app.models import AudioQualityReport
+
+    report = db.get(AudioQualityReport, session_id)
+    return dict(report.speaker_names or {}) if report is not None else {}
+
+
 def label_tokens(segments, tokens) -> list[int | None]:
     """逐词取说话人（tokens 有 start_ms / end_ms，按时间排序）。"""
     if not segments:
@@ -189,7 +261,14 @@ def label_tokens(segments, tokens) -> list[int | None]:
     return [speaker_at(segments, t.start_ms, t.end_ms) if t.end_ms is not None else None for t in tokens]
 
 
-def speaker_name(speaker: int) -> str:
+MAX_NAME_LENGTH = 20
+
+
+def speaker_name(speaker: int, names: dict | None = None) -> str:
+    """用户起的名字优先（如“主持人”），否则“说话人 A”。"""
+    custom = (names or {}).get(str(speaker))
+    if custom:
+        return custom
     letters = ""
     n = speaker
     while True:
@@ -223,7 +302,7 @@ def analyze_session(session_id: str) -> None:
 
     with db_module.SessionLocal() as db:
         report = db.get(AudioQualityReport, session_id)
-        if report is None or report.speaker_analysis_status not in ("pending", "failed"):
+        if report is None or report.speaker_analysis_status != "pending":
             return
         report.speaker_analysis_status = "running"
         db.commit()
@@ -232,6 +311,7 @@ def analyze_session(session_id: str) -> None:
         full = samples.size <= MAX_FULL_SECONDS * SAMPLE_RATE
         segments = normalize(diarize(samples if full else excerpts(samples, SAMPLE_RATE), SAMPLE_RATE))
         count = summarize(segments)
+        segments = fold_minor(segments)
     except Exception:  # noqa: BLE001
         logger.exception("说话人区分失败：%s", session_id)
         with db_module.SessionLocal() as db:

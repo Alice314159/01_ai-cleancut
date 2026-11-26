@@ -281,7 +281,7 @@ def export_render_subtitles(session_id: str, version_id: str, format: Literal["s
         elif format == 'txt':
             raise ValueError('请先完成成片转写后导出 TXT')
         else:
-            result = transcript_export.export_render(output, version)
+            result = transcript_export.export_render(output, version, diarization.session_names(db, session_id))
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Response(result, media_type="text/plain; charset=utf-8", headers={

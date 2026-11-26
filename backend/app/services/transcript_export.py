@@ -18,12 +18,12 @@ def timestamp(ms):
     return f'{hours:02}:{minutes:02}:{seconds:02},{millis:03}'
 
 
-def subtitle_cues(tokens):
+def subtitle_cues(tokens, names=None):
     """切字幕条；换人处必定另起一条，换人后的第一条前面加“说话人 X：”。"""
     previous = None
     for start, end, text, speaker in _cues(tokens):
         if speaker is not None and speaker != previous:
-            text = f"{diarization.speaker_name(speaker)}：{text}"
+            text = f"{diarization.speaker_name(speaker, names)}：{text}"
         previous = speaker if speaker is not None else previous
         yield start, end, text
 
@@ -47,7 +47,7 @@ def _cues(tokens):
         yield group[0].start_ms, end, ' '.join(content(group).split()), getattr(group[0], "speaker", None)
 
 
-def turns(tokens):
+def turns(tokens, names=None):
     """TXT 导出：有说话人时按轮次分段，每段前标说话人。"""
     paragraphs, current, speaker = [], [], None
     for token in tokens:
@@ -59,7 +59,7 @@ def turns(tokens):
         current.append(token)
     if current:
         paragraphs.append((speaker, current))
-    return '\n\n'.join(f"{diarization.speaker_name(s)}：{content(group)}" if s is not None else content(group)
+    return '\n\n'.join(f"{diarization.speaker_name(s, names)}：{content(group)}" if s is not None else content(group)
                        for s, group in paragraphs) + '\n'
 
 
@@ -77,12 +77,13 @@ def export(db, session, job_id, format):
     ) or any(a.start_ms > b.start_ms for a, b in zip(tokens, tokens[1:])):
         raise ValueError('缺少有效的真实转写，或转写已更新，请刷新后重试')
     tokens = with_speakers(db, session.id, tokens)
+    names = diarization.session_names(db, session.id)
     if format == 'txt':
         if all(t.speaker is None for t in tokens):
             return content(tokens) + '\n'
-        return turns(tokens)
+        return turns(tokens, names)
     return ''.join(f'{i}\n{timestamp(start)} --> {timestamp(end)}\n{text}\n\n'
-                   for i, (start, end, text) in enumerate(subtitle_cues(tokens), 1))
+                   for i, (start, end, text) in enumerate(subtitle_cues(tokens, names), 1))
 
 
 def snapshot(db, session_id):
@@ -98,7 +99,7 @@ def snapshot(db, session_id):
     return [dict(text=t.text, start_ms=t.start_ms, end_ms=t.end_ms, job_id=t.job_id, speaker=s) for t, s in zip(tokens, speakers)]
 
 
-def export_render(output, version):
+def export_render(output, version, names=None):
     if any(d['action'] == 'REPLACE_AUDIO' and d['accepted'] for d in output.decisions):
         raise ValueError('成片包含重录片段，请等待成片转写完成或点击重试后导出字幕')
     if not output.transcript_snapshot:
@@ -121,4 +122,4 @@ def export_render(output, version):
     if not words:
         raise ValueError('成片中没有可导出的转写文字')
     return ''.join(f'{i}\n{timestamp(start)} --> {timestamp(end)}\n{text}\n\n'
-                   for i, (start, end, text) in enumerate(subtitle_cues(words), 1))
+                   for i, (start, end, text) in enumerate(subtitle_cues(words, names), 1))

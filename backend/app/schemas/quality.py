@@ -19,6 +19,10 @@ class AudioQualityReportOut(CamelModel):
     content_type_overridden_by_user: bool
     speaker_analysis_status: str = "unavailable"
     speaker_count: int | None = None
+    speaker_names: dict[str, str] | None = None
+    # 以下两项在接口里现算：本机现在是否装好了模型；有没有全程分段（能不能手动更正）
+    speaker_model_available: bool = False
+    speakers: list[int] = []
 
 
 class QualityEventOut(CamelModel):
@@ -41,3 +45,13 @@ class LiveSignalOut(CamelModel):
     became_final_decision: bool | None = None
     invalidated: bool | None = None
     invalidation_reason: str | None = None
+
+
+class SpeakerNamesIn(CamelModel):
+    names: dict[str, str]
+
+
+class AssignSpeakerIn(CamelModel):
+    start_ms: int
+    end_ms: int
+    speaker: int

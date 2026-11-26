@@ -325,6 +325,15 @@ export const api = {
   updateChapter(id: string, chapterId: string, body: { startMs?: number; title?: string }) {
     return request<Chapter>(`/api/sessions/${id}/chapters/${chapterId}`, { method: 'PATCH', body: JSON.stringify(body) })
   },
+  renameSpeakers(id: string, names: Record<string, string>) {
+    return request<AudioQualityReport>(`/api/sessions/${id}/speakers/names`, { method: 'PUT', body: JSON.stringify({ names }) })
+  },
+  assignSpeaker(id: string, startMs: number, endMs: number, speaker: number) {
+    return request<AudioQualityReport>(`/api/sessions/${id}/speakers/assign`, { method: 'POST', body: JSON.stringify({ startMs, endMs, speaker }) })
+  },
+  reanalyzeSpeakers(id: string) {
+    return request<AudioQualityReport>(`/api/sessions/${id}/speakers/analyze`, { method: 'POST' })
+  },
   deleteChapter(id: string, chapterId: string) {
     return request<void>(`/api/sessions/${id}/chapters/${chapterId}`, { method: 'DELETE' })
   },

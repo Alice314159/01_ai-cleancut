@@ -2,6 +2,7 @@ import { RenderTranscriptPanel } from '../components/RenderTranscriptPanel'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { RetakeDialog, type RetakeTarget } from '../components/RetakeDialog'
 import { ChapterPanel } from '../components/ChapterPanel'
+import { SpeakerPanel } from '../components/SpeakerPanel'
 import { CoverPicker } from '../components/CoverPicker'
 import { Card, Chip } from '../components/Bits'
 import { isBoolean, oneOf, usePref } from '../lib/prefs'
@@ -12,7 +13,7 @@ import { WaveformRibbon } from '../components/WaveformRibbon'
 import { envelope as mockEnvelope } from '../mock/data'
 import { ACTION_LABEL, dur, isCutAction, LOUDNESS_TARGET_LABEL, loudnessSummary, speakerName, tc } from '../lib/format'
 import { api, ApiError, DecisionConflictError, EXPORT_BITRATES, type ExportFormat, type SessionDetail } from '../lib/api'
-import type { AudioVersion, Chapter, EditDecision, MappedChapter, LoudnessTarget, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
+import type { AudioQualityReport, AudioVersion, Chapter, EditDecision, MappedChapter, LoudnessTarget, RenderOutput, TranscriptionJob, TranscriptToken, Warning } from '../types/api'
 
 const FALLBACK_WAVE = mockEnvelope(190, 19)
 const PAUSE_THRESHOLD_MS = 400
@@ -87,6 +88,8 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   const [exportBitrate, setExportBitrate] = usePref<number>('exportBitrate', 192, oneOf<number>(...EXPORT_BITRATES))
   const [exporting, setExporting] = useState<ExportFormat | null>(null)
   const [chapters, setChapters] = useState<Chapter[]>([])
+  const [speakerReport, setSpeakerReport] = useState<AudioQualityReport | null>(null)
+  const [speakerMenuOpen, setSpeakerMenuOpen] = useState(false)
   const [chapterText, setChapterText] = useState<string | null>(null)
   const [chapterCopied, setChapterCopied] = useState(false)
   // 成片时间轴上的章节（后端按这版成片的剪辑快照换算），用于导出前核对。
@@ -156,13 +159,13 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
   /** historyLabel：把这次重载带来的决策变化记成一步可撤销操作（用于保存重录后），否则清空撤销记录。 */
   const loadAll = useCallback(async (historyLabel?: string) => {
     const revision = ++loadRevisionRef.current
-    const [detail, ds, ts, ws, output, versions, roles, transcriptionJob, chapterList] = await Promise.all([
+    const [detail, ds, ts, ws, output, versions, roles, transcriptionJob, chapterList, quality] = await Promise.all([
       api.getSession(sessionId), api.getDecisions(sessionId), api.getTranscript(sessionId),
       api.getWarnings(sessionId), api.getRender(sessionId), api.getVersions(sessionId), api.getRoles(sessionId), api.getLatestTranscription(sessionId),
-      api.listChapters(sessionId),
+      api.listChapters(sessionId), api.getQuality(sessionId).catch(() => null),
     ])
     if (revision !== loadRevisionRef.current) return detail
-    setSession(detail); if (historyLabel) applyDecisions(ds, historyLabel); else resetDecisions(ds); setTranscript(ts); setWarnings(ws); setRendered(output); setAsrJob(transcriptionJob); setChapters(chapterList)
+    setSession(detail); if (historyLabel) applyDecisions(ds, historyLabel); else resetDecisions(ds); setTranscript(ts); setWarnings(ws); setRendered(output); setAsrJob(transcriptionJob); setChapters(chapterList); setSpeakerReport(quality)
     const sourceId = roles.find((role) => role.role === 'RENDER_SOURCE')?.audioVersionId
     setSource(versions.find((version) => version.id === sourceId) ?? null)
     setLoaded(true)
@@ -293,7 +296,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
 
   const clearWordSelection = () => {
     wordAnchorRef.current = null
-    setWordSelection(null)
+    setWordSelection(null); setSpeakerMenuOpen(false)
     setStartSeconds(''); setEndSeconds('')
   }
 
@@ -396,6 +399,33 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
       onDataChange()
     }
     setTitleDraft(null)
+  })
+
+  // 说话人区分在后台运行：完成后刷新转写，让说话人标签出现
+  const speakerRunning = speakerReport?.speakerAnalysisStatus === 'pending' || speakerReport?.speakerAnalysisStatus === 'running'
+  useEffect(() => {
+    if (!speakerRunning) return
+    let cancelled = false
+    const timer = window.setInterval(() => {
+      void api.getQuality(sessionId).then(async (report) => {
+        if (cancelled || !report) return
+        if (report.speakerAnalysisStatus !== 'pending' && report.speakerAnalysisStatus !== 'running') {
+          const tokens = await api.getTranscript(sessionId)
+          if (cancelled) return
+          setTranscript(tokens)
+        }
+        setSpeakerReport(report)
+      }).catch(() => undefined)
+    }, 3000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [speakerRunning, sessionId])
+
+  const handleAssignSpeaker = (speaker: number) => perform(async () => {
+    if (!wordSelection) return
+    setSpeakerReport(await api.assignSpeaker(sessionId, wordSelection.startMs, wordSelection.endMs, speaker))
+    setTranscript(await api.getTranscript(sessionId))
+    setSpeakerMenuOpen(false)
+    clearWordSelection()
   })
 
   const handleChapterFromSelection = () => perform(async () => {
@@ -877,7 +907,7 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                 const speaker = paragraph[0].token.speaker
                 const previousSpeaker = paragraphIndex > 0 ? transcriptParagraphs[paragraphIndex - 1][0].token.speaker : null
                 return <p className="transcript-paragraph" key={paragraph[0].token.id}>
-                {speaker != null && speaker !== previousSpeaker && <span className={`speaker-tag speaker-tag--${speaker % 6}`}>{speakerName(speaker)}</span>}
+                {speaker != null && speaker !== previousSpeaker && <span className={`speaker-tag speaker-tag--${speaker % 6}`}>{speakerName(speaker, speakerReport?.speakerNames)}</span>}
                 {paragraph.map(({ token, index }) => {
                 const prev = transcript[index - 1]
                 const gapMs = prev?.jobId && prev.endMs != null && token.jobId && token.endMs != null
@@ -948,8 +978,24 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
                   <button className="btn" disabled={busy || !source} onClick={() => previewRange(wordSelection.startMs, wordSelection.endMs)}>▶ 试听</button>
                   <button className="btn" disabled={busy || !ready || asrRunning} onClick={() => openRetake(wordSelection.startMs, wordSelection.endMs, wordSelectionText)}>重录<span className="wide-only">选中片段</span></button>
                   <button className="btn" disabled={busy || !ready} onClick={handleChapterFromSelection} title="以选中内容的开头作为新章节起点"><span className="wide-only">设为</span>章节</button>
+                  {!!speakerReport?.speakers?.length && speakerReport.speakerAnalysisStatus === 'done' && (
+                    <button className="btn" disabled={busy} aria-expanded={speakerMenuOpen} onClick={() => setSpeakerMenuOpen((open) => !open)} title="更正这段是谁说的">说话人</button>
+                  )}
                   <button className="btn btn--link" disabled={busy} onClick={clearWordSelection} aria-label="取消选择">取消</button>
                 </div>
+                {speakerMenuOpen && !!speakerReport?.speakers?.length && (
+                  <div className="speaker-menu" role="group" aria-label="改为哪位说话人">
+                    <span className="card__hint">这段是谁说的：</span>
+                    {speakerReport.speakers.map((speaker) => (
+                      <button key={speaker} type="button" className={`speaker-tag speaker-tag--${speaker % 6} speaker-menu__option`} disabled={busy}
+                        onClick={() => handleAssignSpeaker(speaker)}>{speakerName(speaker, speakerReport.speakerNames)}</button>
+                    ))}
+                    {(() => { const next = Math.max(...speakerReport.speakers) + 1; return (
+                      <button type="button" className={`speaker-tag speaker-tag--${next % 6} speaker-menu__option`} disabled={busy}
+                        onClick={() => handleAssignSpeaker(next)}>＋ 新说话人</button>
+                    ) })()}
+                  </div>
+                )}
               </div>
               <div className="word-selection-spacer" aria-hidden="true" />
               </>
@@ -1114,6 +1160,12 @@ export function ReviewPage({ sessionId, onDataChange, onEnhance }: { sessionId: 
         <ChapterPanel sessionId={sessionId} chapters={chapters} onChange={setChapters} totalMs={totalMs} disabled={busy || !ready}
           currentMs={() => (audioRef.current?.currentTime ?? 0) * 1000}
           onSeek={(ms) => { const audio = audioRef.current; if (!audio) return; previewEndRef.current = null; audio.currentTime = ms / 1000; void audio.play().catch(() => undefined) }} />
+
+        <SpeakerPanel sessionId={sessionId} report={speakerReport} onChange={(report) => {
+          const started = report.speakerAnalysisStatus === 'pending'
+          setSpeakerReport(report)
+          if (!started) void api.getTranscript(sessionId).then(setTranscript).catch(() => undefined)
+        }} disabled={busy || !ready} />
 
         <Card title="本次处理的提醒">
           <WarningList warnings={warnings} />
